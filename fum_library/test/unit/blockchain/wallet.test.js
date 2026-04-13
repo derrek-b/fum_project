@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { ethers } from 'ethers';
-import { quickTestSetup } from '../../test-env.js';
+import { connectToSharedHardhat } from '../../test-env.js';
 import { createWeb3Provider, createJsonRpcProvider, getConnectedAccounts, requestWalletConnection, getChainId, switchChain } from '../../../src/blockchain/wallet.js';
 
 describe('Wallet - Unit Tests', () => {
@@ -15,8 +15,8 @@ describe('Wallet - Unit Tests', () => {
   let originalWindow;
 
   beforeAll(async () => {
-    // Setup test environment without deploying contracts (wallet tests don't need them)
-    env = await quickTestSetup();
+    // Connect to shared Hardhat node (wallet tests don't need contracts)
+    env = await connectToSharedHardhat();
 
     // Store original window object
     originalWindow = global.window;
@@ -29,10 +29,7 @@ describe('Wallet - Unit Tests', () => {
   }, 120000); // 2 minute timeout
 
   afterAll(async () => {
-    if (env && env.teardown) {
-      await env.teardown();
-    }
-
+    // No teardown — shared Hardhat is managed by globalSetup
     // Restore original window
     global.window = originalWindow;
   });
@@ -47,8 +44,8 @@ describe('Wallet - Unit Tests', () => {
     if (env && env.revert && snapshotId) {
       try {
         await env.revert(snapshotId);
-        // DO NOT take a new snapshot - we reuse the SAME one
-        // DO NOT clear snapshotId - we need it for the next test
+        // evm_revert invalidates the snapshot ID — must take a fresh one
+        snapshotId = await env.snapshot();
       } catch (error) {
         console.warn('Failed to revert snapshot:', error.message);
       }

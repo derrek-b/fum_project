@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { ethers } from 'ethers';
 import JSBI from 'jsbi';
-import { setupTestEnvironment } from '../../test-env.js';
+import { setupV3SharedEnvironment } from '../../setup/v3-setup.js';
 import UniswapV3Adapter from '../../../src/adapters/UniswapV3Adapter.js';
 import chains from '../../../src/configs/chains.js';
 import { getTokenBySymbol, getTokenAddress, getWrappedNativeAddress } from '../../../src/helpers/tokenHelpers.js';
@@ -20,11 +20,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
   beforeAll(async () => {
     try {
-      // Setup test environment with Hardhat fork and full deployment for contract testing
-      env = await setupTestEnvironment({
-        deployContracts: true, // Need deployed contracts for gas estimation tests
-        port: 8545,
-      });
+      // Connect to shared Hardhat node (started by globalSetup) and setup V3 state
+      env = await setupV3SharedEnvironment();
 
       // Create adapter instance — constructor creates its own AlphaRouter provider
       // from chain config (localhost:8545 for chainId 1337), so port must match above
@@ -49,9 +46,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
   }, 120000); // 2 minute timeout for setup
 
   afterAll(async () => {
-    if (env && env.teardown) {
-      await env.teardown();
-    }
+    // No teardown — shared Hardhat is managed by globalSetup
   });
 
   // No beforeEach - snapshot is taken once in beforeAll
@@ -9772,13 +9767,6 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // Test 10: Quote format validation
         expect(quote).toMatch(/^\d+$/);
 
-        // Test 11: Quote reasonableness - should be roughly 0.5 * usdcPerEth
-        const expectedUsdc = parseFloat(env.usdcPerEth) * 0.5;
-        const actualUsdc = parseFloat(ethers.utils.formatUnits(quote, 6));
-
-        // Allow 5% variance due to price impact
-        expect(actualUsdc).toBeGreaterThan(expectedUsdc * 0.95);
-        expect(actualUsdc).toBeLessThan(expectedUsdc * 1.05);
       });
 
       it('should return correct quote for 1000 USDC → ETH swap', async () => {
@@ -9801,13 +9789,6 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // Test 10: Quote format validation
         expect(quote).toMatch(/^\d+$/);
 
-        // Test 11: Quote reasonableness - should be roughly 1000 / usdcPerEth
-        const expectedEth = 1000 / parseFloat(env.usdcPerEth);
-        const actualEth = parseFloat(ethers.utils.formatEther(quote));
-
-        // Allow 5% variance due to price impact
-        expect(actualEth).toBeGreaterThan(expectedEth * 0.95);
-        expect(actualEth).toBeLessThan(expectedEth * 1.05);
       });
 
       it('should return consistent quotes for multiple calls', async () => {

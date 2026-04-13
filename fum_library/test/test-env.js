@@ -16,6 +16,7 @@
 import { ethers } from 'ethers';
 import { startHardhat, TEST_ACCOUNTS } from './setup/hardhat-config.js';
 import { deployFUMContracts, deployTestVault } from './setup/test-contracts.js';
+import { loadSharedState } from './shared-state.js';
 
 /**
  * Core test environment setup
@@ -188,6 +189,69 @@ export async function quickTestSetup(options = {}) {
     quiet: true,
     ...options,
   });
+}
+
+/**
+ * Connect to a shared Hardhat node started by globalSetup.
+ * Reverts to the base snapshot (clean deployed state) and returns
+ * an environment compatible with the per-file setup functions.
+ *
+ * @returns {Object} Environment with provider, signers, snapshot/revert, etc.
+ */
+export async function connectToSharedHardhat() {
+  const state = loadSharedState();
+  const rpcUrl = `http://localhost:${state.port}`;
+
+  const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+
+  // Revert to base snapshot (clean state: contracts deployed, accounts funded)
+  await provider.send('evm_revert', [state.baseSnapshotId]);
+  // Re-take the base snapshot so the next test file can also revert to it
+  const newBaseSnapshotId = await provider.send('evm_snapshot', []);
+
+  // Advance block timestamp to current wall clock time if it's behind.
+  // After long-running tests (TJ, V4), the fork timestamp drifts behind real time.
+  // Swaps/mints with deadlines computed from Date.now() would revert with "Transaction too old".
+  const currentTimestamp = Math.floor(Date.now() / 1000);
+  const latestBlock = await provider.getBlock('latest');
+  if (latestBlock.timestamp < currentTimestamp) {
+    await provider.send('evm_setNextBlockTimestamp', [currentTimestamp]);
+    await provider.send('evm_mine', []);
+  }
+
+  // Create signers for test accounts
+  const signers = TEST_ACCOUNTS.slice(0, 10).map(
+    account => new ethers.Wallet(account.privateKey, provider)
+  );
+
+  return {
+    provider,
+    signers,
+    accounts: TEST_ACCOUNTS,
+    chainId: state.chainId,
+
+    async snapshot() {
+      return await provider.send('evm_snapshot', []);
+    },
+
+    async revert(snapshotId) {
+      await provider.send('evm_revert', [snapshotId]);
+    },
+
+    async increaseTime(seconds) {
+      await provider.send('evm_increaseTime', [seconds]);
+      await provider.send('evm_mine', []);
+    },
+
+    async mineBlocks(count = 1) {
+      for (let i = 0; i < count; i++) {
+        await provider.send('evm_mine', []);
+      }
+    },
+
+    // No teardown — the shared node is managed by globalSetup
+    async teardown() {},
+  };
 }
 
 // Export all test utilities

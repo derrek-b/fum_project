@@ -141,8 +141,7 @@ async function validateDeterministicAddresses(actualAddresses, chainId) {
     console.error('✅ New addresses saved. Run the test again to use the updated addresses.');
     console.error('\nFailing fast to avoid wasting time on a broken test run.');
 
-    // Exit the entire process immediately
-    process.exit(1);
+    throw new Error('Deterministic address validation failed — addresses updated, re-run tests');
   }
 
   console.log('✅ All contract addresses match stored values!\n');
@@ -424,6 +423,34 @@ function mapContractName(contractName) {
   };
 
   return nameMap[contractName] || contractName;
+}
+
+/**
+ * Get contract instances for already-deployed contracts (shared Hardhat node).
+ * Reads addresses from the shared state file (written by globalSetup) and
+ * ABIs from the contracts data module.
+ * @param {ethers.Signer} signer - Signer to connect contracts with
+ * @returns {Object} { contracts, addresses } matching deployFUMContracts return shape
+ */
+export async function getDeployedContracts(signer) {
+  const { loadSharedState } = await import('../shared-state.js');
+  const state = loadSharedState();
+  const deployedAddresses = state.addresses;
+
+  const contracts = {};
+
+  // VaultFactory
+  const vfAddr = deployedAddresses.VaultFactory;
+  if (!vfAddr) throw new Error('No VaultFactory address in shared state');
+  contracts.vaultFactory = new ethers.Contract(vfAddr, contractsData.VaultFactory.abi, signer);
+
+  // BabyStepsStrategy
+  const bsAddr = deployedAddresses.BabyStepsStrategy;
+  if (bsAddr) {
+    contracts.babySteps = new ethers.Contract(bsAddr, contractsData.bob.abi, signer);
+  }
+
+  return { contracts, addresses: deployedAddresses };
 }
 
 /**

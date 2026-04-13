@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { ethers } from 'ethers';
 import JSBI from 'jsbi';
-import { setupV4TestEnvironment } from '../../setup/v4-setup.js';
+import { setupV4SharedEnvironment } from '../../setup/v4-setup.js';
 import UniswapV4Adapter from '../../../src/adapters/UniswapV4Adapter.js';
 import chains from '../../../src/configs/chains.js';
 import { configureBlockExplorer, resetBlockExplorerConfig } from '../../../src/services/blockExplorer.js';
@@ -92,14 +92,8 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
   beforeAll(async () => {
     try {
-      // Setup V4 test environment with Hardhat fork
-      // This includes: ETH→USDC swap, Permit2 approvals, pool data fetch
-      // Port must be 8545 — adapter constructor creates its own AlphaRouter provider
-      // from chain config (localhost:8545 for chainId 1337)
-      env = await setupV4TestEnvironment({
-        deployContracts: true,
-        port: 8545,
-      });
+      // Connect to shared Hardhat node (started by globalSetup) and setup V4 state
+      env = await setupV4SharedEnvironment();
 
       // Use the adapter from the V4 environment
       adapter = env.adapter;
@@ -125,9 +119,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
   }, 180000); // 3 minute timeout for V4 setup (includes swap)
 
   afterAll(async () => {
-    if (env && env.teardown) {
-      await env.teardown();
-    }
+    // No teardown — shared Hardhat is managed by globalSetup
   });
 
   afterEach(async () => {
@@ -1053,7 +1045,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
         // Verify to is Universal Router
         expect(result.to).toBe(adapter.addresses.universalRouterAddress);
-      }, 60000);
+      }, 180000); // AlphaRouter ERC20 routing can be slow on fork
 
       it('should use default slippageTolerance and deadlineMinutes when not provided', async () => {
         const result = await adapter._generateSwapData({

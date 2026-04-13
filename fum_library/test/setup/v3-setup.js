@@ -9,7 +9,7 @@
  */
 
 import { ethers } from 'ethers';
-import { setupCoreEnvironment } from '../test-env.js';
+import { setupCoreEnvironment, connectToSharedHardhat } from '../test-env.js';
 import chains from '../../src/configs/chains.js';
 import tokens from '../../src/configs/tokens.js';
 import { UniswapV3Adapter } from '../../src/adapters/index.js';
@@ -247,5 +247,31 @@ export async function setupV3TestEnvironment(options = {}) {
 
   console.log('✅ V3 test environment ready!');
 
+  return env;
+}
+
+/**
+ * V3 test environment using a shared Hardhat node (started by globalSetup).
+ * Connects to the existing node, creates V3-specific state (vault, position, tokens).
+ * @returns {Object} Test environment with V3-specific utilities
+ */
+export async function setupV3SharedEnvironment() {
+  const { getDeployedContracts } = await import('./test-contracts.js');
+  const coreEnv = await connectToSharedHardhat();
+
+  // Get contract instances from already-deployed addresses
+  const deployment = await getDeployedContracts(coreEnv.signers[0]);
+  coreEnv.contracts = deployment.contracts;
+  coreEnv.contractAddresses = deployment.addresses;
+
+  // Add V3-specific setup (vault, position, tokens)
+  const v3Env = await setupV3Environment(coreEnv);
+
+  const env = {
+    ...coreEnv,
+    ...v3Env,
+  };
+
+  console.log('✅ V3 shared environment ready!');
   return env;
 }

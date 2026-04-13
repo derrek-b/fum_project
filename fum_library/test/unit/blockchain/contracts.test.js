@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { ethers } from 'ethers';
-import { setupTestEnvironment } from '../../test-env.js';
+import { setupV3SharedEnvironment } from '../../setup/v3-setup.js';
 import UniswapV3Adapter from '../../../src/adapters/UniswapV3Adapter.js';
 import {
   getContract,
@@ -28,12 +28,8 @@ describe('contracts.js - Unit Tests', () => {
 
   beforeAll(async () => {
     try {
-      // Setup test environment with Hardhat fork and full deployment for contract testing
-      // Use port 8545 to avoid conflicts with other test files
-      env = await setupTestEnvironment({
-        deployContracts: true, // Need deployed contracts for testing
-        port: 8545,
-      });
+      // Connect to shared Hardhat node (started by globalSetup) and setup V3 state
+      env = await setupV3SharedEnvironment();
 
       console.log('Hardhat test environment started successfully');
       console.log('Provider URL:', env.provider.connection?.url || 'Local provider');
@@ -54,9 +50,7 @@ describe('contracts.js - Unit Tests', () => {
   }, 120000); // 2 minute timeout for setup
 
   afterAll(async () => {
-    if (env && env.teardown) {
-      await env.teardown();
-    }
+    // No teardown — shared Hardhat is managed by globalSetup
   });
 
   // No beforeEach - snapshot is taken once in beforeAll

@@ -10,7 +10,7 @@
  */
 
 import { ethers } from 'ethers';
-import { setupCoreEnvironment } from '../test-env.js';
+import { setupCoreEnvironment, connectToSharedHardhat } from '../test-env.js';
 import chains from '../../src/configs/chains.js';
 import tokens from '../../src/configs/tokens.js';
 import { UniswapV4Adapter } from '../../src/adapters/index.js';
@@ -264,5 +264,31 @@ export async function setupV4TestEnvironment(options = {}) {
 
   console.log('✅ V4 test environment ready!');
 
+  return env;
+}
+
+/**
+ * V4 test environment using a shared Hardhat node (started by globalSetup).
+ * Connects to the existing node, creates V4-specific state (vault, swaps, position).
+ * @returns {Object} Test environment with V4-specific utilities
+ */
+export async function setupV4SharedEnvironment() {
+  const { getDeployedContracts } = await import('./test-contracts.js');
+  const coreEnv = await connectToSharedHardhat();
+
+  // Get contract instances from already-deployed addresses
+  const deployment = await getDeployedContracts(coreEnv.signers[0]);
+  coreEnv.contracts = deployment.contracts;
+  coreEnv.contractAddresses = deployment.addresses;
+
+  // Add V4-specific setup (vault, swaps, position, Permit2 approvals)
+  const v4Env = await setupV4Environment(coreEnv);
+
+  const env = {
+    ...coreEnv,
+    ...v4Env,
+  };
+
+  console.log('✅ V4 shared environment ready!');
   return env;
 }
