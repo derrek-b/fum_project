@@ -41,6 +41,23 @@ export const fetchBlacklistData = async (vaultAddresses) => {
 };
 
 /**
+ * Retry a blacklisted vault via automation service
+ * @param {string} vaultAddress - Vault address to retry
+ * @returns {Promise<object>} { success: true, vaultAddress }
+ * @throws {Error} If retry fails
+ */
+export const retryBlacklistedVault = async (vaultAddress) => {
+  const response = await fetch(`${SSE_BASE_URL}/vault/${vaultAddress}/retry`, {
+    method: 'POST'
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || `Retry failed (${response.status})`);
+  }
+  return response.json();
+};
+
+/**
  * Fetch funding-required data from automation service
  * @returns {Promise<object>} Funding-required data keyed by vault address
  */

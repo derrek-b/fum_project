@@ -21,7 +21,7 @@ import RefreshControls from "../../components/common/RefreshControls";
 import { useToast } from "../../context/ToastContext";
 import { useProviders } from '../../hooks/useProviders';
 import { updateVault } from "../../redux/vaultsSlice";
-import { getVaultData, loadVaultTokenBalances, calculateVaultAPY } from '../../utils/vaultsHelpers';
+import { getVaultData, loadVaultTokenBalances, calculateVaultAPY, retryBlacklistedVault } from '../../utils/vaultsHelpers';
 import { formatTimestamp } from "fum_library/helpers";
 import { getAllTokens } from "fum_library/helpers";
 import { fetchTokenPrices, prefetchTokenPrices } from 'fum_library/services';
@@ -124,6 +124,7 @@ export default function VaultDetailPage() {
   const [selectedWithdrawToken, setSelectedWithdrawToken] = useState(null);
   const [showFundExecutorModal, setShowFundExecutorModal] = useState(false);
   const [executorBalance, setExecutorBalance] = useState(null);
+  const [isRetryingBlacklist, setIsRetryingBlacklist] = useState(false);
 
   // Get strategy data from Redux (memoized to prevent unnecessary re-renders)
   const strategyConfig = useMemo(() => strategyConfigs?.[vaultAddress], [strategyConfigs, vaultAddress]);
@@ -206,6 +207,20 @@ export default function VaultDetailPage() {
     setSelectedWithdrawToken(token);
     setShowWithdrawModal(true);
   }, [isOwner, showError]);
+
+  // Handle retry for blacklisted vaults
+  const handleRetryBlacklist = useCallback(async () => {
+    if (!vaultAddress || !automationConnected) return;
+    setIsRetryingBlacklist(true);
+    try {
+      await retryBlacklistedVault(vaultAddress);
+      showSuccess('Retry initiated — vault is being re-setup');
+    } catch (error) {
+      showError(`Retry failed: ${error.message}`);
+    } finally {
+      setIsRetryingBlacklist(false);
+    }
+  }, [vaultAddress, automationConnected, showSuccess, showError]);
 
   // Handle the automation toggle - memoized
   const handleAutomationToggle = useCallback(async (enabled) => {
@@ -680,15 +695,13 @@ export default function VaultDetailPage() {
                     <Tooltip>
                       {!automationConnected && !automationEnabled
                         ? "Cannot connect to automation service - vaults not being monitored"
-                        : vaultFromRedux?.isBlacklisted && !automationEnabled
-                          ? "Vault is blacklisted - cannot re-enable until blacklist is cleared"
-                          : !vaultFromRedux.strategy?.strategyId || vaultFromRedux.strategy?.strategyId === 'none'
-                            ? "Automation requires an active strategy"
-                            : ((vaultMetrics?.tvl) + (vaultMetrics?.tokenTVL) === 0)
-                              ? "Automation requires assets in the vault"
-                              : automationEnabled
-                                ? "Click to disable automated strategy execution"
-                                : "Click to enable automated strategy execution"}
+                        : !vaultFromRedux.strategy?.strategyId || vaultFromRedux.strategy?.strategyId === 'none'
+                          ? "Automation requires an active strategy"
+                          : ((vaultMetrics?.tvl) + (vaultMetrics?.tokenTVL) === 0)
+                            ? "Automation requires assets in the vault"
+                            : automationEnabled
+                              ? "Click to disable automated strategy execution"
+                              : "Click to enable automated strategy execution"}
                     </Tooltip>
                   }
                 >
@@ -706,9 +719,7 @@ export default function VaultDetailPage() {
                         !vaultFromRedux.strategy?.strategyId ||
                         vaultFromRedux.strategy?.strategyId === 'none' ||
                         // 3. TVL is 0 (no assets in vault)
-                        ((vaultMetrics?.tvl || 0) + (vaultMetrics?.tokenTVL || 0) === 0) ||
-                        // 4. Vault is blacklisted and automation is off (can't re-enable until blacklist cleared)
-                        (vaultFromRedux?.isBlacklisted && !automationEnabled)
+                        ((vaultMetrics?.tvl || 0) + (vaultMetrics?.tokenTVL || 0) === 0)
                       }
                       style={{ transform: 'scale(1.2)', marginRight: '0.5rem' }}
                     />
@@ -788,12 +799,29 @@ export default function VaultDetailPage() {
                 </Alert.Heading>
                 <p className="mb-2">
                   This vault has been removed from automated management due to an unrecoverable error.
-                  To re-enable automation, disable and re-enable the automation toggle after resolving the issue.
+                  Click Retry to clear the blacklist and re-attempt vault setup.
                 </p>
                 {vaultFromRedux.blacklistReason && (
-                  <p className="mb-0">
+                  <p className="mb-2">
                     <strong>Reason:</strong> {vaultFromRedux.blacklistReason}
                   </p>
+                )}
+                {isOwner && automationConnected && (
+                  <Button
+                    variant="outline-dark"
+                    size="sm"
+                    onClick={handleRetryBlacklist}
+                    disabled={isRetryingBlacklist}
+                  >
+                    {isRetryingBlacklist ? (
+                      <>
+                        <Spinner animation="border" size="sm" className="me-2" />
+                        Retrying...
+                      </>
+                    ) : (
+                      'Retry'
+                    )}
+                  </Button>
                 )}
               </div>
             </Alert>
