@@ -17,6 +17,8 @@ new SSEBroadcaster(eventManager, {
   getTrackingFailures,    // () => Object — callback for tracking failures
   getVaultMetadata,       // (addr) => Object — callback for vault metadata
   getVaultTransactions,   // (addr, start, end) => Promise<Array> — callback for vault transactions
+  getFundingRequired,     // () => Object — callback for executor funding status
+  retryBlacklistedVault,  // (addr) => Promise<Object> — callback to retry a blacklisted vault
   onCrash                 // (error) => void — callback for fatal errors
 })
 ```
@@ -38,8 +40,10 @@ new SSEBroadcaster(eventManager, {
 | `GET /blacklist` | `handleBlacklistRequest` | Current blacklist data. Optional `?vaults=addr1,addr2` filter. |
 | `GET /tracking-failures` | `handleTrackingFailuresRequest` | Current tracking failures |
 | `GET /failed-vaults` | `handleFailedVaultsRequest` | Current failed vaults (retry queue). Optional `?vaults=addr1,addr2` filter. |
+| `GET /funding-required` | `handleFundingRequiredRequest` | Executor funding status. Optional `?vaults=addr1,addr2` filter. |
 | `GET /vault/:address/metadata` | `handleVaultRequest` | Vault metadata from Tracker |
 | `GET /vault/:address/transactions?start=&end=` | `handleVaultRequest` | Vault transaction history |
+| `POST /vault/:address/retry` | `handleVaultPostRequest` | Clear blacklist and retry vault setup. Returns `{ success, vaultAddress }` on success. Errors: 404 (not blacklisted), 409 (no executor / not ours), 500, 503 (not running). |
 
 ## Broadcast Events
 

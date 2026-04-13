@@ -196,6 +196,33 @@ Vault fails during processing
 │   └── Emit VaultBlacklisted
 ```
 
+## Manual Retry Flow (Blacklisted Vaults)
+
+When a vault is blacklisted, the user can trigger a retry via the frontend Retry button (or directly via `POST /vault/:address/retry`). This bypasses the normal auth revoke/re-grant cycle:
+
+```
+POST /vault/:address/retry → SSEBroadcaster → retryBlacklistedVault(address)
+│
+├── Guard: isRunning? isVaultBlacklisted?
+├── Verify executor on-chain:
+│   ├── getVaultContract().executor() → must not be zero address
+│   └── Derive from hdNode + executorIndex → must match on-chain executor
+│
+├── unblacklistVault() → Emit VaultUnblacklisted
+├── Clear from failedVaults (retry queue)
+├── Clear from vaultTripHistory (reset yo-yo detection)
+│
+├── setupVault(address, { forceRefresh: true })
+│   ├── Success → Emit VaultOnboarded
+│   └── Failure:
+│       ├── InsufficientGasError → enterFundingRequired()
+│       └── Other error → trackFailedVault(source: 'manual_retry')
+│
+└── Return { success: true, vaultAddress } (or throw on failure)
+```
+
+The `VaultAuthGranted` handler follows the same unblacklist → setupVault pattern but is triggered by an on-chain event instead of an HTTP request.
+
 ## Service Shutdown Flow
 
 ```

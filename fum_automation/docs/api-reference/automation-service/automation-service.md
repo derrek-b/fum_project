@@ -67,6 +67,7 @@ Creates: EventManager, VaultDataService, Tracker, SSEBroadcaster, BabyStepsStrat
 | `blacklistVault(vaultAddress, reason)` | Permanently exclude vault, persist to disk |
 | `unblacklistVault(vaultAddress)` | Remove from blacklist |
 | `isVaultBlacklisted(vaultAddress)` | Check blacklist status |
+| `retryBlacklistedVault(vaultAddress)` | Clear blacklist, verify executor on-chain, reset trip history, re-attempt setupVault. Called via POST /vault/:address/retry. Throws if not blacklisted, no executor, or executor not ours. |
 | `getBlacklistData()` | Get full blacklist Map |
 | `loadBlacklist()` / `saveBlacklist()` | Disk persistence |
 
