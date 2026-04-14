@@ -20,6 +20,7 @@
 /out/
 
 # build artifacts
+/artifacts/
 /bytecode/
 
 # production

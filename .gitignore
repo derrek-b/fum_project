@@ -7,11 +7,9 @@ node_modules/
 !.env.example
 !.env.test.example
 
-# Build artifacts
-artifacts/
+# Build artifacts (per-subproject patterns live in each subproject's .gitignore)
 cache/
 bytecode/
-dist/
 *.tgz
 
 # Coverage
