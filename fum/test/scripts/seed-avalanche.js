@@ -1,15 +1,10 @@
 // test/scripts/seed-avalanche.js
-// Seeds the local Hardhat Avalanche fork with a vault and tokens.
-// Optionally creates a Trader Joe V2.2 WAVAX/USDC position in the vault,
-// configures strategy, and enables automation.
+// Seeds the local Hardhat Avalanche fork with a vault, tokens, and a Trader Joe V2.2 WAVAX/USDC position.
 //
 // Usage:
-//   node test/scripts/seed-avalanche.js                                        # vault + tokens
-//   ENABLE_POSITION=1 node test/scripts/seed-avalanche.js                      # + position in vault
-//   ENABLE_STRATEGY=1 node test/scripts/seed-avalanche.js                      # + strategy + targets
-//   ENABLE_STRATEGY=1 ENABLE_POSITION=1 node test/scripts/seed-avalanche.js    # + strategy + position
-//   ENABLE_AUTOMATION=1 node test/scripts/seed-avalanche.js                    # + strategy + executor
-//   ENABLE_AUTOMATION=1 ENABLE_POSITION=1 node test/scripts/seed-avalanche.js  # + strategy + position + executor
+//   node test/scripts/seed-avalanche.js                     # vault + tokens + position on wallet
+//   ENABLE_STRATEGY=1 node test/scripts/seed-avalanche.js   # + strategy + targets
+//   ENABLE_AUTOMATION=1 node test/scripts/seed-avalanche.js  # + position transferred to vault + executor (full automation)
 //
 // NOTE: This script is for local Hardhat testing only
 
@@ -60,21 +55,16 @@ const STRATEGY_ABI = [
 async function main() {
   const enableAutomation = process.env.ENABLE_AUTOMATION === '1';
   const enableStrategy = enableAutomation || process.env.ENABLE_STRATEGY === '1';
-  const enablePosition = process.env.ENABLE_POSITION === '1';
 
   const networkConfig = getChainConfig(CHAIN_ID);
   if (!networkConfig) {
     throw new Error(`Network with chainId ${CHAIN_ID} not configured`);
   }
 
-  const flags = [
-    enablePosition && 'position',
-    enableStrategy && 'strategy',
-    enableAutomation && 'executor',
-  ].filter(Boolean);
-
   console.log(`Seeding local Hardhat (${networkConfig.name}) — Trader Joe V2.2 WAVAX/USDC`);
-  console.log(`  Mode: vault + tokens${flags.length ? ' + ' + flags.join(' + ') : ''}`);
+  if (enableAutomation) console.log('  Mode: full automation (strategy + executor + position in vault)');
+  else if (enableStrategy) console.log('  Mode: strategy configured (position on wallet)');
+  else console.log('  Mode: base (position on wallet, no strategy)');
 
   const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
   const signer = new ethers.Wallet(
@@ -180,126 +170,124 @@ async function main() {
   console.log(`  WAVAX: ${ethers.utils.formatEther(await wavaxContract.balanceOf(vaultAddress))}`);
   console.log(`  USDC:  ${ethers.utils.formatUnits(await usdcContract.balanceOf(vaultAddress), 6)}`);
 
-  // === 4. Create TJ position in vault (opt-in) ===
-  let positionId = null;
+  // === 4. Create TJ position on wallet ===
+  console.log('\nCreating Trader Joe WAVAX/USDC position on wallet...');
 
-  if (enablePosition) {
-    console.log('\nCreating Trader Joe WAVAX/USDC position in vault...');
+  const adapter = new TraderJoeV2_2Adapter(CHAIN_ID, provider);
+  const poolData = await adapter.getPoolData(LB_PAIR_ADDRESS, provider);
+  console.log(`Pool active bin: ${poolData.activeId}, binStep: ${poolData.binStep}`);
 
-    const adapter = new TraderJoeV2_2Adapter(CHAIN_ID, provider);
-    const poolData = await adapter.getPoolData(LB_PAIR_ADDRESS, provider);
-    console.log(`Pool active bin: ${poolData.activeId}, binStep: ${poolData.binStep}`);
+  const BIN_SPACING = 10;
+  const lowerBinId = poolData.activeId - BIN_SPACING;
+  const upperBinId = poolData.activeId + BIN_SPACING;
+  console.log(`Bin range: ${lowerBinId} to ${upperBinId}`);
 
-    const BIN_SPACING = 10;
-    const lowerBinId = poolData.activeId - BIN_SPACING;
-    const upperBinId = poolData.activeId + BIN_SPACING;
-    console.log(`Bin range: ${lowerBinId} to ${upperBinId}`);
+  // Use wallet's remaining WAVAX + some USDC for the position
+  // (wallet still has WAVAX from the initial wrap minus what was transferred to vault)
+  const walletWavax = await wavaxContract.balanceOf(signer.address);
+  const wavaxForPosition = walletWavax.div(2);
+  // Swap some WAVAX for USDC on the wallet for position creation
+  console.log('Swapping WAVAX for USDC (for position)...');
+  await (await lbRouter.swapExactTokensForTokens(
+    wavaxForPosition, 0,
+    { pairBinSteps: [10], versions: [3], tokenPath: [WAVAX_ADDRESS, USDC_ADDRESS] },
+    signer.address, deadline
+  )).wait();
 
-    // Use half of vault's tokens for the position
-    const vaultWavax = await wavaxContract.balanceOf(vaultAddress);
-    const vaultUsdc = await usdcContract.balanceOf(vaultAddress);
-    const wavaxForPosition = vaultWavax.div(2);
-    const usdcForPosition = vaultUsdc.div(2);
+  const walletWavaxForPos = await wavaxContract.balanceOf(signer.address);
+  const walletUsdcForPos = await usdcContract.balanceOf(signer.address);
 
-    // Sort tokens (TJ requires tokenX = lower address)
-    const wavaxData = { address: WAVAX_ADDRESS, symbol: 'WAVAX', decimals: 18 };
-    const usdcData = { address: USDC_ADDRESS, symbol: 'USDC', decimals: 6 };
-    const { sortedToken0, sortedToken1, tokensSwapped } = adapter.sortTokens(wavaxData, usdcData);
+  // Sort tokens (TJ requires tokenX = lower address)
+  const wavaxData = { address: WAVAX_ADDRESS, symbol: 'WAVAX', decimals: 18 };
+  const usdcData = { address: USDC_ADDRESS, symbol: 'USDC', decimals: 6 };
+  const { sortedToken0, sortedToken1, tokensSwapped } = adapter.sortTokens(wavaxData, usdcData);
 
-    const token0Amount = tokensSwapped ? usdcForPosition : wavaxForPosition;
-    const token1Amount = tokensSwapped ? wavaxForPosition : usdcForPosition;
+  const token0Amount = tokensSwapped ? walletUsdcForPos : walletWavaxForPos;
+  const token1Amount = tokensSwapped ? walletWavaxForPos : walletUsdcForPos;
 
-    // Approve TJPositionManager to pull tokens from vault
-    const approvalTxs = await adapter.getRequiredApprovals(
-      'liquidity', vaultAddress, [WAVAX_ADDRESS, USDC_ADDRESS], provider
-    );
+  // Approve TJPositionManager to pull tokens from wallet
+  const approvalTxs = await adapter.getRequiredApprovals(
+    'liquidity', signer.address, [WAVAX_ADDRESS, USDC_ADDRESS], provider
+  );
 
-    if (approvalTxs.length > 0) {
-      console.log(`Approving TJPositionManager (${approvalTxs.length} tokens)...`);
-      const approveTx = await vault.approve(
-        approvalTxs.map(t => t.to),
-        approvalTxs.map(t => t.data)
-      );
-      await approveTx.wait();
+  for (const tx of approvalTxs) {
+    await (await signer.sendTransaction(tx)).wait();
+  }
+  if (approvalTxs.length > 0) console.log(`Approved TJPositionManager (${approvalTxs.length} tokens)`);
+
+  console.log('Creating position...');
+  const createPositionData = await adapter.generateCreatePositionData({
+    position: { lowerBinId, upperBinId },
+    token0Amount: token0Amount.toString(),
+    token1Amount: token1Amount.toString(),
+    provider,
+    walletAddress: signer.address,
+    poolData: { ...poolData, address: LB_PAIR_ADDRESS },
+    token0Data: sortedToken0,
+    token1Data: sortedToken1,
+    slippageTolerance: 1,
+    deadlineMinutes: 5,
+  });
+
+  const createTxResult = await (await signer.sendTransaction({
+    to: createPositionData.to,
+    data: createPositionData.data,
+    value: createPositionData.value,
+    gasLimit: 10000000,
+  })).wait();
+
+  const POSITION_CREATED_TOPIC = ethers.utils.id(
+    'PositionCreated(uint256,address,address,address,uint256[],uint256[],uint256,uint256)'
+  );
+  const positionCreatedLog = createTxResult.logs.find(log => log.topics[0] === POSITION_CREATED_TOPIC);
+
+  if (!positionCreatedLog) {
+    throw new Error('PositionCreated event not found — position creation may have failed');
+  }
+
+  const positionId = ethers.BigNumber.from(positionCreatedLog.topics[1]);
+  console.log(`Position created: #${positionId} (on wallet)`);
+
+  // === 5. Generate fees with round-trip swaps ===
+  const NUM_SWAPS = 10;
+  const BIN_STEP = 10;
+  const VERSION = 3;
+  console.log(`\nGenerating fees with ${NUM_SWAPS} round-trip swaps on WAVAX/USDC ${BIN_STEP}bps pool...`);
+
+  // Fund signer with WAVAX for swaps
+  await (await wavaxContract.deposit({ value: ethers.utils.parseEther('100') })).wait();
+  await (await wavaxContract.approve(tjAddresses.lbRouterAddress, ethers.constants.MaxUint256)).wait();
+
+  // Swap 50 WAVAX → USDC to have both tokens for round-trips
+  await (await lbRouter.swapExactTokensForTokens(
+    ethers.utils.parseEther('50'), 0,
+    { pairBinSteps: [BIN_STEP], versions: [VERSION], tokenPath: [WAVAX_ADDRESS, USDC_ADDRESS] },
+    signer.address, deadline
+  )).wait();
+
+  const signerUsdc = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
+  await (await signerUsdc.approve(tjAddresses.lbRouterAddress, ethers.constants.MaxUint256)).wait();
+
+  for (let i = 0; i < NUM_SWAPS; i++) {
+    try {
+      await (await lbRouter.swapExactTokensForTokens(
+        ethers.utils.parseEther('5'), 0,
+        { pairBinSteps: [BIN_STEP], versions: [VERSION], tokenPath: [WAVAX_ADDRESS, USDC_ADDRESS] },
+        signer.address, deadline
+      )).wait();
+
+      const usdcBal = await signerUsdc.balanceOf(signer.address);
+      const swapBack = usdcBal.div(2);
+      await (await lbRouter.swapExactTokensForTokens(
+        swapBack, 0,
+        { pairBinSteps: [BIN_STEP], versions: [VERSION], tokenPath: [USDC_ADDRESS, WAVAX_ADDRESS] },
+        signer.address, deadline
+      )).wait();
+
+      console.log(`  Round-trip ${i + 1}/${NUM_SWAPS} complete`);
+    } catch (error) {
+      console.error(`  Round-trip ${i + 1} failed: ${error.message}`);
     }
-
-    console.log('Creating position...');
-    const createPositionData = await adapter.generateCreatePositionData({
-      position: { lowerBinId, upperBinId },
-      token0Amount: token0Amount.toString(),
-      token1Amount: token1Amount.toString(),
-      provider,
-      walletAddress: vaultAddress,
-      poolData: { ...poolData, address: LB_PAIR_ADDRESS },
-      token0Data: sortedToken0,
-      token1Data: sortedToken1,
-      slippageTolerance: 1,
-      deadlineMinutes: 5,
-    });
-
-    const mintTx = await vault.mint(
-      [createPositionData.to],
-      [createPositionData.data],
-      [createPositionData.value],
-      { gasLimit: 10000000 }
-    );
-    const mintReceipt = await mintTx.wait();
-
-    const POSITION_CREATED_TOPIC = ethers.utils.id(
-      'PositionCreated(uint256,address,address,address,uint256[],uint256[],uint256,uint256)'
-    );
-    const positionCreatedLog = mintReceipt.logs.find(log => log.topics[0] === POSITION_CREATED_TOPIC);
-
-    if (!positionCreatedLog) {
-      throw new Error('PositionCreated event not found — mint may have failed');
-    }
-
-    positionId = ethers.BigNumber.from(positionCreatedLog.topics[1]);
-    console.log(`Position created: #${positionId}`);
-
-    // === 5. Generate fees with round-trip swaps ===
-    const NUM_SWAPS = 10;
-    const BIN_STEP = 10;
-    const VERSION = 3;
-    console.log(`\nGenerating fees with ${NUM_SWAPS} round-trip swaps on WAVAX/USDC ${BIN_STEP}bps pool...`);
-
-    // Fund signer with WAVAX for swaps
-    await (await wavaxContract.deposit({ value: ethers.utils.parseEther('100') })).wait();
-    await (await wavaxContract.approve(tjAddresses.lbRouterAddress, ethers.constants.MaxUint256)).wait();
-
-    // Swap 50 WAVAX → USDC to have both tokens for round-trips
-    await (await lbRouter.swapExactTokensForTokens(
-      ethers.utils.parseEther('50'), 0,
-      { pairBinSteps: [BIN_STEP], versions: [VERSION], tokenPath: [WAVAX_ADDRESS, USDC_ADDRESS] },
-      signer.address, deadline
-    )).wait();
-
-    const signerUsdc = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
-    await (await signerUsdc.approve(tjAddresses.lbRouterAddress, ethers.constants.MaxUint256)).wait();
-
-    for (let i = 0; i < NUM_SWAPS; i++) {
-      try {
-        await (await lbRouter.swapExactTokensForTokens(
-          ethers.utils.parseEther('5'), 0,
-          { pairBinSteps: [BIN_STEP], versions: [VERSION], tokenPath: [WAVAX_ADDRESS, USDC_ADDRESS] },
-          signer.address, deadline
-        )).wait();
-
-        const usdcBal = await signerUsdc.balanceOf(signer.address);
-        const swapBack = usdcBal.div(2);
-        await (await lbRouter.swapExactTokensForTokens(
-          swapBack, 0,
-          { pairBinSteps: [BIN_STEP], versions: [VERSION], tokenPath: [USDC_ADDRESS, WAVAX_ADDRESS] },
-          signer.address, deadline
-        )).wait();
-
-        console.log(`  Round-trip ${i + 1}/${NUM_SWAPS} complete`);
-      } catch (error) {
-        console.error(`  Round-trip ${i + 1} failed: ${error.message}`);
-      }
-    }
-  } else {
-    console.log('\nSkipping position creation (set ENABLE_POSITION=1 to enable)');
   }
 
   // === 6. Set strategy + targets (opt-in) ===
@@ -326,9 +314,19 @@ async function main() {
     console.log('\nSkipping strategy setup (set ENABLE_STRATEGY=1 to enable)');
   }
 
-  // === 7. Authorize executor (opt-in) ===
-  // Runs LAST — this fires the on-chain event that the automation service listens for.
+  // === 7. Transfer position to vault + authorize executor (opt-in) ===
+  // Runs LAST — setExecutor fires the on-chain event that the automation service listens for.
   if (enableAutomation) {
+    // Transfer position from wallet to vault via TJPositionManager.safeTransferFrom
+    console.log(`\nTransferring position #${positionId} to vault...`);
+    const positionManagerAddress = tjAddresses.positionManagerAddress;
+    const tjPositionManager = new ethers.Contract(positionManagerAddress, [
+      'function safeTransferFrom(address from, address to, uint256 tokenId)',
+    ], signer);
+    await (await tjPositionManager.safeTransferFrom(signer.address, vaultAddress, positionId)).wait();
+    console.log(`Position #${positionId} transferred to vault`);
+
+    // Authorize executor
     const vaultInfo = await vaultFactory.getVaultInfo(vaultAddress);
     const executorIndex = vaultInfo[4];
 
@@ -337,7 +335,7 @@ async function main() {
     const executorAddress = hdNode.derivePath(`m/44'/60'/0'/0/${executorIndex}`).address;
 
     const executorFunding = ethers.utils.parseEther('10');
-    console.log(`\nAuthorizing executor ${executorAddress} and funding with ${ethers.utils.formatEther(executorFunding)} AVAX...`);
+    console.log(`Authorizing executor ${executorAddress} and funding with ${ethers.utils.formatEther(executorFunding)} AVAX...`);
     await (await vault.setExecutor(executorAddress, { value: executorFunding })).wait();
 
     const executorBalance = await provider.getBalance(executorAddress);
@@ -350,7 +348,7 @@ async function main() {
   console.log('\n====================');
   console.log('Seed complete!');
   console.log(`Vault: ${vaultAddress}`);
-  if (positionId) console.log(`Position: #${positionId} (in vault)`);
+  console.log(`Position: #${positionId} (${enableAutomation ? 'in vault' : 'on wallet'})`);
   console.log('Wallet funded with AVAX, WAVAX, USDT.');
   if (enableStrategy) console.log('Strategy: BabySteps Aggressive (template 3)');
   if (enableAutomation) console.log('Automation enabled — vault ready for automation service.');
