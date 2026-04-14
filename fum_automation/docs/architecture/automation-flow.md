@@ -1,4 +1,4 @@
-<!-- Source: src/core/AutomationService.js, src/core/VaultDataService.js, src/core/EventManager.js, src/core/SSEBroadcaster.js, src/core/VaultHealth.js -->
+<!-- Source: src/core/AutomationService.js, src/core/VaultDataService.js, src/core/EventManager.js, src/core/SSEBroadcaster.js, src/core/VaultHealth.js, src/core/ServiceHealth.js -->
 # Automation Flow
 
 ## Overview
@@ -44,31 +44,64 @@ new AutomationService(config)
 
 ## Provider Reconnection Flow
 
+Disconnect detection has three paths:
+1. **WebSocket `close` / `error`** — raw transport event from ethers, code ≠ 1000 triggers reconnect
+2. **Heartbeat failure** — 30s `getBlockNumber()` poll throws, RPC-level liveness check
+3. **ServiceHealth** — SubscriptionCanary (silent eth_subscription death) or PingPongKeepalive (silent transport death), both funnel through `handleProviderDisconnect(1006, reason)`
+
+All three converge on the same `attemptReconnection()` flow:
+
 ```
-Provider disconnect/error detected (or heartbeat failure)
+Provider disconnect/error detected
 │
 ├── If already reconnecting → skip (isReconnecting guard)
 ├── isReconnecting = true
+├── Stop heartbeat interval
+├── ServiceHealth.stop() — tears down canary + keepalive timers
+│
 ├── Exponential backoff delay (reconnectBaseDelay × 2^attempt)
 │   └── 1s → 2s → 4s → 8s → 16s
 │
-├── Create new WebSocket provider
-├── Stop heartbeat interval
-├── eventManager.setEnabled(false) — suppress events during transition
+├── Clean up old provider (remove listeners, null out websocket)
+├── Remove all EventManager listeners (they reference the old provider)
+├── Create new WebSocket provider, attach close/error handlers
+├── Verify chainId matches config
 │
-├── Inject new provider into VaultDataService, strategies
+├── Inject new provider into VaultHealth, VaultDataService, strategies
 ├── reestablishEventListeners()
 │   ├── Re-subscribe to authorization events (ExecutorChanged)
 │   ├── Re-subscribe to strategy parameter events (ParameterUpdated)
-│   └── For each vault: re-subscribe to swap + config events
+│   └── For each cached vault: re-subscribe to swap + config events
 │
-├── Restart heartbeat, eventManager.setEnabled(true)
+├── refreshAuthorizationState()
+│   ├── Read on-chain getActiveVaults() from VaultFactory
+│   ├── Diff against vaultDataService.getAllVaults()
+│   ├── For each on-chain but not cached:
+│   │   ├── Skip if in failedVaults (retry queue handles it)
+│   │   ├── Skip if blacklisted
+│   │   ├── HD-tree verify ownership, skip if not ours
+│   │   └── Emit synthetic VaultAuthGranted → setupVault
+│   └── For each cached but not on-chain:
+│       └── Emit synthetic VaultAuthRevoked → offboardVault
+│
+├── refreshVaultConfigs({ skipVaults: granted ∪ revoked })
+│   └── For each remaining cached vault:
+│       ├── Read on-chain targetTokens / targetPlatforms / strategy params
+│       ├── Compare to cache (JSON.stringify for params)
+│       └── If different → handleConfigUpdate (lock-aware: queues on locked vaults)
+│
+├── Restart heartbeat
+├── ServiceHealth.updateProvider(newProvider) — restart canary + keepalive
 ├── reconnectAttempts = 0, isReconnecting = false
 ├── Emit ProviderReconnected
 │
 └── If attempt >= maxReconnectAttempts (5):
     └── Emit ProviderFailed → fatal error handler
 ```
+
+**Why refresh instead of event replay:** config and auth events that fire during the outage are lost — the subscription filter doesn't buffer them. Instead of replaying missed events, the refresh passes re-read canonical state from chain and route any differences through the existing handlers. Swap events aren't part of the refresh because they're self-healing (the next swap catches the service up). Position and token balances aren't refreshed either because they're mutated by the service's own transactions, not by missed events.
+
+**Why skip granted + revoked in config refresh:** both sets are being actively mutated by async `setupVault` / `offboardVault` handlers triggered from the auth refresh pass. Reading their config state mid-mutation would race against the cache and in the revoke case could attempt a `handleConfigUpdate` on a half-offboarded cache entry. Skipping them is correct because `setupVault` already does a full config load for granted vaults, and revoked vaults don't need their config updated.
 
 ## Vault Setup Flow
 

@@ -36,7 +36,8 @@ src/
 │   ├── EventManager.js        # Pub/sub for system events (FeesCollected, PositionRebalanced, etc.)
 │   ├── Tracker.js             # Transaction history and performance tracking
 │   ├── SSEBroadcaster.js      # Real-time updates to frontend via Server-Sent Events
-│   └── VaultHealth.js         # Executor gas monitoring and automated top-ups
+│   ├── VaultHealth.js         # Executor gas monitoring and automated top-ups
+│   └── ServiceHealth.js       # WebSocket subscription canary + ping/pong keepalive
 ├── strategies/
 │   ├── base/StrategyBase.js   # Abstract base: evaluation, lifecycle, fee handling
 │   └── babySteps/BabyStepsStrategy.js  # Conservative range-based automation

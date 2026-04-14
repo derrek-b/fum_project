@@ -1,4 +1,4 @@
-<!-- Source: src/core/AutomationService.js, src/core/VaultDataService.js, src/core/EventManager.js, src/core/Tracker.js, src/core/SSEBroadcaster.js, src/core/VaultHealth.js, src/strategies/*, src/utils/* -->
+<!-- Source: src/core/AutomationService.js, src/core/VaultDataService.js, src/core/EventManager.js, src/core/Tracker.js, src/core/SSEBroadcaster.js, src/core/VaultHealth.js, src/core/ServiceHealth.js, src/strategies/*, src/utils/* -->
 # Automation Service Architecture
 
 ## Overview
@@ -26,9 +26,10 @@
         ▼                                ▼
 ┌─ Strategy Execution ────────┐  ┌─ Supporting Services ───────────┐
 │  StrategyBase (abstract)    │  │  VaultHealth - executor gas mgmt │
-│  └── BabyStepsStrategy      │  │  Tracker - tx history, ROI      │
-│      (type: 'bob')          │  │  SSEBroadcaster - frontend SSE  │
-└─────────────────────────────┘  │  RetryHelper - backoff utilities │
+│  └── BabyStepsStrategy      │  │  ServiceHealth - WS health check │
+│      (type: 'bob')          │  │  Tracker - tx history, ROI      │
+└─────────────────────────────┘  │  SSEBroadcaster - frontend SSE  │
+                                 │  RetryHelper - backoff utilities │
                                  └─────────────────────────────────┘
 ```
 
@@ -43,7 +44,8 @@ src/
 │   ├── EventManager.js               # Pub/sub + blockchain listeners
 │   ├── Tracker.js                    # Transaction history & performance
 │   ├── SSEBroadcaster.js            # SSE streaming to frontend
-│   └── VaultHealth.js               # Executor gas monitoring & top-ups
+│   ├── VaultHealth.js               # Executor gas monitoring & top-ups
+│   └── ServiceHealth.js             # WS subscription canary + ping/pong keepalive
 ├── strategies/
 │   ├── base/StrategyBase.js          # Abstract base class
 │   └── babySteps/BabyStepsStrategy.js # Concrete strategy
@@ -62,7 +64,8 @@ AutomationService creates all components in its constructor:
 3. **Tracker** — receives `{ vaultDataDir, trackingFailuresFilePath, eventManager, chainId, debug }`, subscribes to events automatically
 4. **SSEBroadcaster** — receives EventManager + callback functions for data access
 5. **VaultHealth** — receives EventManager + chainId in constructor, then dependencies via setters (`setProvider`, `setHdNode`, `setVaultDataService`, `setTokens`, `setAdapters`, `setLockFunctions`) during `initialize()`
-6. **BabyStepsStrategy** — receives full dependencies object (see [Strategy System](./strategy-system.md))
+6. **ServiceHealth** — receives `{ eventManager, log }` in constructor; started at the end of `service.start()` (after strategy initialization completes) with `{ provider, chainId, onUnhealthy, ...overrides }`. Deferred start avoids canary false-positives during the heavy local computation (AlphaRouter routing, SDK math) in `strategy.initializeVault`.
+7. **BabyStepsStrategy** — receives full dependencies object (see [Strategy System](./strategy-system.md))
 
 Strategies receive shared references to AutomationService caches (vaultLocks, poolData, tokens, adapters) — not copies. This ensures all components see the same data.
 
