@@ -187,6 +187,13 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       expect(service.vaultHealth.balanceCheckIntervalMs).toBe(0);
     });
 
+    it('should initialize ServiceHealth correctly (pre-start, not running)', () => {
+      expect(service.serviceHealth).toBeDefined();
+      expect(service.serviceHealth.running).toBe(false);
+      expect(service.serviceHealth.isCanaryActive()).toBe(false);
+      expect(service.serviceHealth.isKeepaliveActive()).toBe(false);
+    });
+
     it('should initialize SSEBroadcaster correctly', () => {
       expect(service.sseBroadcaster).toBeDefined();
       expect(service.sseBroadcaster.eventManager).toBe(service.eventManager);
@@ -331,6 +338,15 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
 
     it('should have VaultHealth balance check interval disabled (post-start)', () => {
       expect(service.vaultHealth.balanceCheckInterval).toBe(null);
+    });
+
+    it('should start ServiceHealth with canary disabled on Hardhat fork (chainId 1337)', () => {
+      expect(service.serviceHealth.running).toBe(true);
+      // Canary is disabled on Hardhat chains (expectedBlockMs is null in chain config).
+      // This prevents false positives on idle local dev where auto-mine produces no blocks.
+      expect(service.serviceHealth.isCanaryActive()).toBe(false);
+      // Ping/pong keepalive is transport-layer and runs on every chain including Hardhat.
+      expect(service.serviceHealth.isKeepaliveActive()).toBe(true);
     });
 
     it('should register Tracker event handlers', () => {

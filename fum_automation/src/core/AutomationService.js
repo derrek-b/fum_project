@@ -6,7 +6,7 @@
 
 import path from 'path';
 import { ethers } from 'ethers';
-import { getAdaptersForChain, getAllTokens, getContract, getActiveVaults, getVaultExecutorIndex, getVaultContract } from 'fum_library';
+import { getAdaptersForChain, getAllTokens, getContract, getActiveVaults, getVaultExecutorIndex, getVaultContract, getContractInfoByAddress, mapStrategyParameters } from 'fum_library';
 import { getChainConfig } from 'fum_library/helpers/chainHelpers';
 import { retryRpcCall, retryWithBackoff } from '../utils/RetryHelper.js';
 import { UnrecoverableError, InsufficientGasError, formatErrorForDisplay } from '../utils/errors.js';
@@ -17,6 +17,7 @@ import VaultDataService from './VaultDataService.js';
 import SSEBroadcaster from './SSEBroadcaster.js';
 import Tracker from './Tracker.js';
 import VaultHealth from './VaultHealth.js';
+import ServiceHealth from './ServiceHealth.js';
 import { BabyStepsStrategy } from '../strategies/index.js';
 
 /**
@@ -110,6 +111,17 @@ class AutomationService {
       debug: this.debug,
       balanceCheckIntervalMs: config.vaultHealthIntervalMs ?? 300000
     });
+
+    this.serviceHealth = new ServiceHealth({
+      eventManager: this.eventManager,
+      log: (msg) => this.log(msg)
+    });
+
+    // Test-only: allow overriding the canary threshold and ping/pong timing
+    // so the dedicated silent-subscription-death / ping-timeout tests can
+    // enable the canary on Hardhat and run their assertions in seconds
+    // instead of production timings. Production callers leave these unset.
+    this.serviceHealthOverrides = config.serviceHealthOverrides || null;
 
     this.sseBroadcaster = new SSEBroadcaster(this.eventManager, {
       port: this.ssePort,
@@ -234,6 +246,19 @@ class AutomationService {
       // Phase 7: Start failed vault retry timer
       this.startFailedVaultRetryTimer();
 
+      // Phase 8: Start ServiceHealth (SubscriptionCanary + PingPongKeepalive).
+      // Deferred to after full startup so heavy strategy initialization work
+      // (AlphaRouter routing, SDK math) doesn't false-positive the canary.
+      this.serviceHealth.start({
+        provider: this.provider,
+        chainId: this.chainId,
+        onUnhealthy: (reason) => {
+          this.log(`ServiceHealth reported unhealthy: ${reason}`);
+          this.handleProviderDisconnect(1006, reason);
+        },
+        ...(this.serviceHealthOverrides || {})
+      });
+
       this.isRunning = true;
 
       this.eventManager.emit('ServiceStarted', {
@@ -291,6 +316,9 @@ class AutomationService {
 
     // 1.5. Stop VaultHealth monitoring
     this.vaultHealth.stop();
+
+    // 1.6. Stop ServiceHealth (canary + ping/pong keepalive)
+    this.serviceHealth.stop();
 
     // 2. Stop heartbeat monitoring
     this.stopHeartbeat();
@@ -447,6 +475,13 @@ class AutomationService {
     // Start heartbeat monitoring
     this.startHeartbeat();
 
+    // Note: ServiceHealth (SubscriptionCanary + PingPongKeepalive) is NOT
+    // started here. It's started at the end of start() after all vaults are
+    // loaded and initialized. Strategy.initializeVault does heavy local
+    // computation (AlphaRouter routing, SDK math) that can block the event
+    // loop for several seconds, which would false-positive the canary. By
+    // deferring until after startup is complete, we avoid that race.
+
     // Diagnostic: WebSocket subscription debugging
     // Enable with DEBUG_WS_EVENTS=true environment variable
     if (process.env.DEBUG_WS_EVENTS === 'true') {
@@ -577,6 +612,10 @@ class AutomationService {
     // Stop heartbeat during reconnection
     this.stopHeartbeat();
 
+    // Stop ServiceHealth — it references the old provider and must be
+    // restarted against the new one after reconnection succeeds.
+    this.serviceHealth.stop();
+
     while (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
       const delay = this.reconnectBaseDelay * Math.pow(2, this.reconnectAttempts - 1);
@@ -627,8 +666,44 @@ class AutomationService {
         this.vaultDataService.provider = this.provider;
         this.updateStrategyDependencies();
 
+        // Data refresh: close the gap between last-seen-event and
+        // first-event-we-can-see-now. Auth + config events that fired during
+        // the outage are not replayed — instead we re-read canonical state
+        // from chain and apply any differences through the existing handlers
+        // (which respect locks via pendingConfigUpdates / pendingOffboards).
+        //
+        // Listeners are already re-established above, so any events arriving
+        // during the refresh flow through the normal handler path.
+        //
+        // Granted and revoked vaults are skipped in the config refresh pass:
+        // granted vaults are being freshly loaded by setupVault (redundant),
+        // revoked vaults are being torn down by offboardVault (racy cache).
+        // They'll be fully re-synced on the next refresh cycle if needed.
+        let authResults = null;
+        try {
+          authResults = await this.refreshAuthorizationState();
+        } catch (error) {
+          this.log(`Refresh: authorization sync failed: ${error.message}`);
+          // Do not fail the whole reconnect on refresh failure — listeners
+          // are live and will catch subsequent events.
+        }
+
+        try {
+          const skipVaults = new Set();
+          if (authResults) {
+            for (const addr of authResults.granted) skipVaults.add(addr);
+            for (const addr of authResults.revoked) skipVaults.add(addr);
+          }
+          await this.refreshVaultConfigs({ skipVaults });
+        } catch (error) {
+          this.log(`Refresh: vault config sync failed: ${error.message}`);
+        }
+
         // Restart heartbeat
         this.startHeartbeat();
+
+        // Restart ServiceHealth against the new provider
+        this.serviceHealth.updateProvider(this.provider);
 
         this.isReconnecting = false;
 
@@ -1850,6 +1925,256 @@ class AutomationService {
 
     return results;
   }
+
+  //#endregion
+
+  //#region Reconnect refresh
+
+  /**
+   * Re-sync authorization state from chain.
+   *
+   * Compares the on-chain active vault set against our cached set and emits
+   * synthetic `VaultAuthGranted` / `VaultAuthRevoked` events for any deltas.
+   * The existing event handlers then run full setup/offboard for each delta,
+   * reusing every code path that normal events exercise. Used after WebSocket
+   * reconnection to recover from auth events that fired during the downtime.
+   *
+   * Grants are gated behind HD-tree ownership verification (same logic as
+   * `loadAuthorizedVaults` and `EventManager.subscribeToAuthorizationEvents`).
+   * Verification failures here do not blacklist — unlike initial load — because
+   * the vault was previously managed successfully and a transient RPC failure
+   * should not cost the user their vault. The next reconnect cycle will retry.
+   *
+   * @returns {Promise<{granted: string[], revoked: string[], skipped: string[]}>}
+   */
+  async refreshAuthorizationState() {
+    this.log('Refresh: syncing authorization state from chain');
+
+    // Read on-chain active set
+    const onChainActive = await retryRpcCall(
+      () => getActiveVaults(this.provider),
+      'getActiveVaults (refresh)',
+      { log: (msg) => this.log(msg) }
+    );
+
+    const onChainSet = new Set(
+      onChainActive.map(v => ethers.utils.getAddress(v))
+    );
+    const cachedVaults = this.vaultDataService.getAllVaults();
+    const cachedSet = new Set(
+      cachedVaults.map(v => ethers.utils.getAddress(v.address))
+    );
+
+    const results = { granted: [], revoked: [], skipped: [] };
+
+    // Detect grants (on-chain but not cached)
+    for (const vaultAddress of onChainSet) {
+      if (cachedSet.has(vaultAddress)) continue;
+
+      // Skip vaults already tracked in the retry queue — the existing
+      // retry timer mechanism will handle them. Emitting a synthetic
+      // VaultAuthGranted here would trigger the handler's "fresh
+      // authorization intent" branch and clear the retry queue entry,
+      // which is wrong for refresh-context detection (we're not
+      // responding to real user intent, just re-syncing state).
+      if (this.failedVaults.has(vaultAddress)) {
+        this.log(`Refresh: skipping ${vaultAddress} (already in retry queue)`);
+        results.skipped.push(vaultAddress);
+        continue;
+      }
+
+      if (this.isVaultBlacklisted(vaultAddress)) {
+        this.log(`Refresh: skipping blacklisted vault ${vaultAddress}`);
+        results.skipped.push(vaultAddress);
+        continue;
+      }
+
+      // Verify HD-tree ownership before emitting grant
+      let executorIndex;
+      let onChainExecutor;
+      try {
+        [executorIndex, onChainExecutor] = await Promise.all([
+          retryRpcCall(
+            () => getVaultExecutorIndex(vaultAddress, this.provider),
+            'getVaultExecutorIndex (refresh)'
+          ),
+          retryRpcCall(
+            () => getVaultContract(vaultAddress, this.provider).executor(),
+            'vault.executor (refresh)'
+          )
+        ]);
+      } catch (error) {
+        this.log(`Refresh: ownership verification RPC failed for ${vaultAddress}: ${error.message}`);
+        results.skipped.push(vaultAddress);
+        continue;
+      }
+
+      const derivedAddress = this.hdNode.derivePath(
+        "m/44'/60'/0'/0/" + executorIndex
+      ).address;
+
+      if (derivedAddress.toLowerCase() !== onChainExecutor.toLowerCase()) {
+        this.log(`Refresh: vault ${vaultAddress} not ours (executor ${onChainExecutor}), skipping`);
+        results.skipped.push(vaultAddress);
+        continue;
+      }
+
+      this.log(`Refresh: detected new authorization for ${vaultAddress}`);
+      this.eventManager.emit('VaultAuthGranted', {
+        vaultAddress,
+        executorAddress: onChainExecutor,
+        executorIndex,
+        log: {
+          level: 'info',
+          message: `Refresh detected new authorization: ${vaultAddress}`
+        }
+      });
+      results.granted.push(vaultAddress);
+    }
+
+    // Detect revocations (cached but not on-chain)
+    for (const vaultAddress of cachedSet) {
+      if (onChainSet.has(vaultAddress)) continue;
+
+      this.log(`Refresh: detected revocation for ${vaultAddress}`);
+      this.eventManager.emit('VaultAuthRevoked', {
+        vaultAddress,
+        log: {
+          level: 'warn',
+          message: `Refresh detected auth revocation: ${vaultAddress}`
+        }
+      });
+      results.revoked.push(vaultAddress);
+    }
+
+    this.log(
+      `Refresh: auth sync complete — granted=${results.granted.length}, ` +
+      `revoked=${results.revoked.length}, skipped=${results.skipped.length}`
+    );
+
+    return results;
+  }
+
+  /**
+   * Re-sync per-vault config state from chain.
+   *
+   * For each managed vault, reads target tokens, target platforms, and strategy
+   * parameters from chain and compares to the cached values. When different,
+   * routes the update through the existing `handleConfigUpdate` path, which
+   * handles lock-aware queueing (locked vaults have the update queued and
+   * applied on `VaultUnlocked`). Used after WebSocket reconnection to recover
+   * from config events that fired during the downtime.
+   *
+   * Only config/auth events mutate the cache in ways we can miss — position
+   * and token-balance state is mutated by the service's own transactions, and
+   * swap events are self-healing via the next swap.
+   *
+   * @param {Object} [options]
+   * @param {Set<string>} [options.skipVaults] - Checksummed addresses to skip.
+   *   Callers pass the granted + revoked sets from a preceding
+   *   `refreshAuthorizationState()` call so we don't race against in-progress
+   *   setupVault / offboardVault handlers. Granted vaults are being freshly
+   *   loaded from chain by setupVault (redundant read). Revoked vaults are
+   *   being torn down by offboardVault (risk of applying config to a
+   *   half-offboarded cache entry).
+   * @returns {Promise<{refreshed: string[], unchanged: string[], skipped: string[], failed: string[]}>}
+   */
+  async refreshVaultConfigs(options = {}) {
+    this.log('Refresh: syncing per-vault config state from chain');
+
+    const skipVaults = options.skipVaults || new Set();
+    const vaults = this.vaultDataService.getAllVaults();
+    const results = { refreshed: [], unchanged: [], skipped: [], failed: [] };
+
+    for (const vault of vaults) {
+      const vaultAddress = ethers.utils.getAddress(vault.address);
+
+      if (skipVaults.has(vaultAddress)) {
+        this.log(`Refresh: skipping ${vaultAddress} (auth state change in progress)`);
+        results.skipped.push(vaultAddress);
+        continue;
+      }
+
+      let anyChanged = false;
+
+      try {
+        const vaultContract = getVaultContract(vaultAddress, this.provider);
+
+        // Target tokens + platforms (cheap: two view calls)
+        const [onChainTokens, onChainPlatforms] = await Promise.all([
+          retryRpcCall(
+            () => vaultContract.getTargetTokens(),
+            'vault.getTargetTokens (refresh)'
+          ),
+          retryRpcCall(
+            () => vaultContract.getTargetPlatforms(),
+            'vault.getTargetPlatforms (refresh)'
+          )
+        ]);
+
+        const cachedTokens = vault.targetTokens || [];
+        const tokensChanged =
+          cachedTokens.length !== onChainTokens.length ||
+          cachedTokens.some((t, i) => t !== onChainTokens[i]);
+        if (tokensChanged) {
+          this.log(`Refresh: target tokens changed for ${vaultAddress}`);
+          await this.handleConfigUpdate(vaultAddress, 'tokens', [...onChainTokens]);
+          anyChanged = true;
+        }
+
+        const cachedPlatforms = vault.targetPlatforms || [];
+        const platformsChanged =
+          cachedPlatforms.length !== onChainPlatforms.length ||
+          cachedPlatforms.some((p, i) => p !== onChainPlatforms[i]);
+        if (platformsChanged) {
+          this.log(`Refresh: target platforms changed for ${vaultAddress}`);
+          await this.handleConfigUpdate(vaultAddress, 'platforms', [...onChainPlatforms]);
+          anyChanged = true;
+        }
+
+        // Strategy parameters — read raw + compare via JSON before firing update
+        // to avoid spurious Telegram notifications when nothing changed.
+        if (vault.strategy?.strategyAddress) {
+          const contractInfo = getContractInfoByAddress(vault.strategy.strategyAddress);
+          const strategyContract = await getContract(contractInfo.contractName, this.provider);
+          const rawParams = await retryRpcCall(
+            () => strategyContract.getAllParameters(vaultAddress),
+            'strategy.getAllParameters (refresh)'
+          );
+          const onChainParams = mapStrategyParameters(contractInfo.contractName, rawParams);
+
+          const cachedParamsJson = JSON.stringify(vault.strategy.parameters ?? null);
+          const onChainParamsJson = JSON.stringify(onChainParams ?? null);
+          if (cachedParamsJson !== onChainParamsJson) {
+            this.log(`Refresh: strategy params changed for ${vaultAddress}`);
+            await this.handleConfigUpdate(vaultAddress, 'params', 'refresh-on-reconnect');
+            anyChanged = true;
+          }
+        }
+
+        if (anyChanged) {
+          results.refreshed.push(vaultAddress);
+        } else {
+          results.unchanged.push(vaultAddress);
+        }
+      } catch (error) {
+        this.log(`Refresh: failed to refresh config for ${vaultAddress}: ${error.message}`);
+        results.failed.push(vaultAddress);
+      }
+    }
+
+    this.log(
+      `Refresh: config sync complete — refreshed=${results.refreshed.length}, ` +
+      `unchanged=${results.unchanged.length}, skipped=${results.skipped.length}, ` +
+      `failed=${results.failed.length}`
+    );
+
+    return results;
+  }
+
+  //#endregion
+
+  //#region Vault Setup
 
   /**
    * Set up a vault for automation
