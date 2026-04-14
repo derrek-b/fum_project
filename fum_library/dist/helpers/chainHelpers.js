@@ -544,3 +544,52 @@ export function getMaxPriorityFeePerGas(chainId) {
 
   return config.maxPriorityFeePerGas;
 }
+
+/**
+ * Get expected block cadence (ms) for the WebSocket subscription canary.
+ *
+ * Returns the number of milliseconds between blocks on the chain under
+ * normal operation, or `null` when the canary should be disabled for this
+ * chain (e.g. Hardhat forks that only mine on transaction arrival).
+ *
+ * The SubscriptionCanary uses this value to compute its deadline threshold
+ * (2 × expectedBlockMs + 500ms buffer). A `null` value means the canary is
+ * skipped entirely for the chain.
+ *
+ * @memberof module:helpers/chainHelpers
+ * @param {number} chainId - The blockchain network ID
+ * @returns {number|null} Expected ms between blocks, or null if disabled
+ * @throws {Error} If chainId is not valid (null, undefined, not a number, not finite, not an integer, or <= 0)
+ * @throws {Error} If chain is not supported
+ * @throws {Error} If expectedBlockMs property is missing from the chain config
+ * @throws {Error} If expectedBlockMs is neither null nor a positive finite number
+ * @example
+ * getExpectedBlockMs(42161); // 250  (Arbitrum)
+ * getExpectedBlockMs(43114); // 2000 (Avalanche)
+ * getExpectedBlockMs(1337);  // null (Hardhat Arbitrum fork — canary disabled)
+ * @since 2.0.0
+ */
+export function getExpectedBlockMs(chainId) {
+  validateChainId(chainId);
+
+  const config = chains[chainId];
+  if (!config) {
+    throw new Error(`Chain ${chainId} is not supported`);
+  }
+
+  if (!('expectedBlockMs' in config)) {
+    throw new Error(`No expectedBlockMs configured for chain ${chainId}`);
+  }
+
+  const value = config.expectedBlockMs;
+
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`expectedBlockMs for chain ${chainId} must be null or a positive finite number, got: ${value}`);
+  }
+
+  return value;
+}

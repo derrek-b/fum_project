@@ -193,6 +193,16 @@ describe('Chain Configuration Validation', () => {
         chainErrors.push(`Property maxPriorityFeePerGas must be a string (wei/gas value), got: ${typeof chain.maxPriorityFeePerGas}`);
       }
 
+      // Validate expectedBlockMs (null or positive finite number).
+      // null disables the SubscriptionCanary for this chain (Hardhat forks).
+      if (!('expectedBlockMs' in chain)) {
+        chainErrors.push(`Missing property: expectedBlockMs`);
+      } else if (chain.expectedBlockMs !== null) {
+        if (typeof chain.expectedBlockMs !== 'number' || !Number.isFinite(chain.expectedBlockMs) || chain.expectedBlockMs <= 0) {
+          chainErrors.push(`Property expectedBlockMs must be null or a positive finite number, got: ${chain.expectedBlockMs}`);
+        }
+      }
+
       // Validate required number properties
       requiredNumberProperties.forEach(prop => {
         if (typeof chain[prop] !== 'number' || !Number.isFinite(chain[prop]) || chain[prop] <= 0) {

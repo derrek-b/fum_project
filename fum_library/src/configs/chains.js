@@ -22,6 +22,7 @@ const chains = {
     minDeploymentForGas: 50,
     minSwapValue: 10,
     transactionDeadlineMinutes: 5,
+    expectedBlockMs: 250,
     platformAddresses: {
       uniswapV3: {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
@@ -59,6 +60,8 @@ const chains = {
     minDeploymentForGas: 50,
     minSwapValue: 10,
     transactionDeadlineMinutes: 5,
+    // null: canary disabled on Hardhat (auto-mine only, no blocks when idle).
+    expectedBlockMs: null,
     platformAddresses: {
       uniswapV3: {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
@@ -96,6 +99,7 @@ const chains = {
     minDeploymentForGas: 10,
     minSwapValue: 0.10,
     transactionDeadlineMinutes: 5,
+    expectedBlockMs: 2000,
     platformAddresses: {
       traderjoeV2_2: {
         lbFactoryAddress: "0xb43120c4745967fa9b93E79C149E66B0f2D6Fe0c",
@@ -124,13 +128,15 @@ const chains = {
     minDeploymentForGas: 10,
     minSwapValue: 0.10,
     transactionDeadlineMinutes: 5,
+    // null: canary disabled on Hardhat (auto-mine only, no blocks when idle).
+    expectedBlockMs: null,
     platformAddresses: {
       traderjoeV2_2: {
         // V2.2 addresses (same as Avalanche mainnet since it's a fork)
         lbFactoryAddress: "0xb43120c4745967fa9b93E79C149E66B0f2D6Fe0c",
         lbRouterAddress: "0x18556DA13313f3532c54711497A8FedAC273220E",
         lbQuoterAddress: "0x9A550a522BBaDFB69019b0432800Ed17855A51C3",
-        positionManagerAddress: "0x17f4B55A352Be71CC03856765Ad04147119Aa09B",  // Populated per test run after TJPositionManager deployment
+        positionManagerAddress: "0xCBd482597a26c0255a5F38B3360bE2015D628187",  // Populated per test run after TJPositionManager deployment
         liquidityHelperAddress: "0xA5c68C9E55Dde3505e60c4B5eAe411e2977dfB35",
       },
     },

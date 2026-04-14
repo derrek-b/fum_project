@@ -22,6 +22,7 @@ import {
   getMinSwapValue,
   getTransactionDeadlineMinutes,
   getMaxPriorityFeePerGas,
+  getExpectedBlockMs,
   configureChainHelpers
 } from '../../../src/helpers/chainHelpers.js';
 
@@ -105,6 +106,7 @@ describe('Chain Helpers', () => {
         expect(config.executorXpub).toBe('');
         expect(config.minExecutorBalance).toBe(0.002);
         expect(config.maxExecutorBalance).toBe(0.004);
+        expect(config.expectedBlockMs).toBe(250);
         expect(config.platformAddresses).toHaveProperty('uniswapV3');
       });
 
@@ -118,6 +120,7 @@ describe('Chain Helpers', () => {
         expect(config.executorXpub).toBe('');
         expect(config.minExecutorBalance).toBe(0.04);
         expect(config.maxExecutorBalance).toBe(0.08);
+        expect(config.expectedBlockMs).toBe(2000);
         expect(config.platformAddresses).toHaveProperty('traderjoeV2_2');
       });
     });
@@ -866,6 +869,135 @@ describe('Chain Helpers', () => {
         expect(() => getTransactionDeadlineMinutes('1')).toThrow('chainId must be a number');
         expect(() => getTransactionDeadlineMinutes(0)).toThrow('chainId must be greater than 0');
         expect(() => getTransactionDeadlineMinutes(-1)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+
+  describe('getExpectedBlockMs', () => {
+    describe('Success Cases', () => {
+      it('should return 250 for Arbitrum One (chainId 42161)', () => {
+        expect(getExpectedBlockMs(42161)).toBe(250);
+      });
+
+      it('should return 2000 for Avalanche (chainId 43114)', () => {
+        expect(getExpectedBlockMs(43114)).toBe(2000);
+      });
+
+      it('should return null for Hardhat Arbitrum fork (chainId 1337)', () => {
+        expect(getExpectedBlockMs(1337)).toBeNull();
+      });
+
+      it('should return null for Hardhat Avalanche fork (chainId 1338)', () => {
+        expect(getExpectedBlockMs(1338)).toBeNull();
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => getExpectedBlockMs(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should throw when expectedBlockMs property is missing from config', async () => {
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            777: {
+              name: 'Test Chain',
+              // expectedBlockMs intentionally missing
+            }
+          }
+        }));
+
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getExpectedBlockMs(777)).toThrow('No expectedBlockMs configured for chain 777');
+
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should throw when expectedBlockMs is a non-positive number', async () => {
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            777: {
+              name: 'Test Chain',
+              expectedBlockMs: 0,
+            }
+          }
+        }));
+
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getExpectedBlockMs(777)).toThrow('expectedBlockMs for chain 777 must be null or a positive finite number');
+
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should throw when expectedBlockMs is a negative number', async () => {
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            777: {
+              name: 'Test Chain',
+              expectedBlockMs: -100,
+            }
+          }
+        }));
+
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getExpectedBlockMs(777)).toThrow('expectedBlockMs for chain 777 must be null or a positive finite number');
+
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should throw when expectedBlockMs is a non-number type', async () => {
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            777: {
+              name: 'Test Chain',
+              expectedBlockMs: '250',
+            }
+          }
+        }));
+
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getExpectedBlockMs(777)).toThrow('expectedBlockMs for chain 777 must be null or a positive finite number');
+
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should throw when expectedBlockMs is Infinity', async () => {
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            777: {
+              name: 'Test Chain',
+              expectedBlockMs: Infinity,
+            }
+          }
+        }));
+
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getExpectedBlockMs(777)).toThrow('expectedBlockMs for chain 777 must be null or a positive finite number');
+
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => getExpectedBlockMs(null)).toThrow('chainId parameter is required');
+        expect(() => getExpectedBlockMs(undefined)).toThrow('chainId parameter is required');
+        expect(() => getExpectedBlockMs('1')).toThrow('chainId must be a number');
+        expect(() => getExpectedBlockMs(0)).toThrow('chainId must be greater than 0');
+        expect(() => getExpectedBlockMs(-1)).toThrow('chainId must be greater than 0');
       });
     });
   });

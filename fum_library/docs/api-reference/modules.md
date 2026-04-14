@@ -295,6 +295,7 @@ Token configuration with addresses on multiple chains
 - `getMinSwapValue` (function)
 - `getTransactionDeadlineMinutes` (function)
 - `getMaxPriorityFeePerGas` (function)
+- `getExpectedBlockMs` (function)
 
 ---
 
