@@ -14,6 +14,7 @@ import { getVaultContract } from 'fum_library/blockchain/contracts';
 import contractData from 'fum_library/artifacts/contracts';
 import { lookupAvailableStrategies, getStrategyParameters, getTemplateDefaults, validateTokensForStrategy, validatePositionsForStrategy } from 'fum_library/helpers/strategyHelpers';
 import { getPlatformMetadata } from 'fum_library/helpers/platformHelpers';
+import { AdapterFactory } from 'fum_library/adapters';
 import { config } from 'dotenv';
 
 /**
@@ -87,6 +88,7 @@ const StrategyConfigPanel = ({
   const [transactionError, setTransactionError] = useState('');
   const [transactionWarning, setTransactionWarning] = useState('');
   const [transactionLoading, setTransactionLoading] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
 
   // Change tracking
   const [initialSelectedStrategy, setInitialSelectedStrategy] = useState('');
@@ -587,6 +589,86 @@ const StrategyConfigPanel = ({
     return steps;
   };
 
+  // Validate that each selected platform has an active pool for each token pair.
+  // Returns an array of `noPool` warnings plus a summary entry describing whether
+  // the failure is partial (some combos work) or total (no combos work).
+  const validatePoolsForConfig = async () => {
+    const warnings = [];
+
+    // Build unique unordered token pairs from selectedTokens
+    const pairs = [];
+    for (let i = 0; i < selectedTokens.length; i++) {
+      for (let j = i + 1; j < selectedTokens.length; j++) {
+        pairs.push([selectedTokens[i], selectedTokens[j]]);
+      }
+    }
+
+    const resolvePlatformName = (platformId) => {
+      try { return getPlatformMetadata(platformId).name; } catch { return platformId; }
+    };
+
+    // Build one check task per (platform, pair) combination
+    const tasks = [];
+    for (const platformId of selectedPlatforms) {
+      const platformName = resolvePlatformName(platformId);
+
+      let adapter;
+      try {
+        adapter = AdapterFactory.getAdapter(platformId, chainId);
+      } catch (error) {
+        // Adapter unavailable — every pair on this platform is a dead combo
+        for (const [tokenA, tokenB] of pairs) {
+          tasks.push(Promise.resolve({
+            type: 'noPool',
+            tokenPair: `${tokenA}/${tokenB}`,
+            platformName,
+            reason: error?.message || 'Adapter unavailable for this chain'
+          }));
+        }
+        continue;
+      }
+
+      for (const [tokenA, tokenB] of pairs) {
+        tasks.push(
+          adapter.selectBestPool(tokenA, tokenB, readProvider, chainId)
+            .then((result) => {
+              if (!result || result.poolsActive === 0) {
+                return {
+                  type: 'noPool',
+                  tokenPair: `${tokenA}/${tokenB}`,
+                  platformName,
+                  reason: `No active pools (with liquidity) found for ${tokenA}/${tokenB} on ${platformName}`
+                };
+              }
+              return null;
+            })
+            .catch((error) => ({
+              type: 'noPool',
+              tokenPair: `${tokenA}/${tokenB}`,
+              platformName,
+              reason: error?.message || 'Pool lookup failed'
+            }))
+        );
+      }
+    }
+
+    const totalCombos = tasks.length;
+    if (totalCombos === 0) return warnings;
+
+    const results = await Promise.all(tasks);
+    const deadCombos = results.filter(Boolean);
+    for (const w of deadCombos) warnings.push(w);
+
+    if (deadCombos.length > 0) {
+      warnings.push({
+        type: 'noPoolSummary',
+        isTotalFailure: deadCombos.length === totalCombos
+      });
+    }
+
+    return warnings;
+  };
+
   // Handle save button click
   const handleSave = async () => {
     // Validation
@@ -648,6 +730,17 @@ const StrategyConfigPanel = ({
             }))
           });
         }
+      }
+    }
+
+    // Async: validate that each selected platform has an active pool per token pair
+    if (selectedTokens.length >= 2 && selectedPlatforms.length > 0 && readProvider && chainId) {
+      setIsValidating(true);
+      try {
+        const poolWarnings = await validatePoolsForConfig();
+        warnings.push(...poolWarnings);
+      } finally {
+        setIsValidating(false);
       }
     }
 
@@ -1160,8 +1253,16 @@ const StrategyConfigPanel = ({
             <Button
               variant="primary"
               onClick={handleSave}
+              disabled={isValidating}
             >
-              Save Configuration
+              {isValidating ? (
+                <>
+                  <Spinner as="span" animation="border" size="sm" className="me-2" />
+                  Validating…
+                </>
+              ) : (
+                'Save Configuration'
+              )}
             </Button>
           </div>
         )}

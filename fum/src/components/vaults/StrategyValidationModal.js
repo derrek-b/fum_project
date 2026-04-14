@@ -84,6 +84,11 @@ const StrategyValidationModal = ({
     return null;
   };
 
+  // Split warnings by severity
+  const noPoolWarnings = warnings.filter(w => w.type === 'noPool');
+  const noPoolSummary = warnings.find(w => w.type === 'noPoolSummary');
+  const noticeWarnings = warnings.filter(w => w.type !== 'noPool' && w.type !== 'noPoolSummary');
+
   return (
     <Modal show={show} onHide={onHide} centered>
       <Modal.Header closeButton>
@@ -92,16 +97,43 @@ const StrategyValidationModal = ({
       <Modal.Body>
         {warnings.length > 0 ? (
           <>
-            <Alert variant="warning">
-              <Alert.Heading>Configuration Notices</Alert.Heading>
-              <p className="mb-3">
-                Please review the following items about your strategy configuration:
-              </p>
-              <hr />
-              <div className="mt-3">
-                {warnings.map((warning, index) => renderWarning(warning, index))}
-              </div>
-            </Alert>
+            {noPoolWarnings.length > 0 && (
+              <Alert variant="danger">
+                <Alert.Heading>Missing Pool{noPoolWarnings.length !== 1 ? 's' : ''}</Alert.Heading>
+                <p className="mb-2">
+                  The following token pair / platform combination{noPoolWarnings.length !== 1 ? 's have' : ' has'} no active pool:
+                </p>
+                <ul className="mb-3">
+                  {noPoolWarnings.map((w, idx) => (
+                    <li key={idx}>{w.reason}</li>
+                  ))}
+                </ul>
+                <hr />
+                <p className="mb-0">
+                  {noPoolSummary?.isTotalFailure ? (
+                    <>
+                      <strong>This strategy setup will fail</strong> — no live pool exists for any selected token pair + platform combination. Saving will likely cause the vault to be blacklisted after retries are exhausted, requiring a manual retry once a pool is created and funded.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Your vault may not perform as expected</strong> — positions will not be deployed for the combinations above. The strategy will still operate on the remaining live combinations.
+                    </>
+                  )}
+                </p>
+              </Alert>
+            )}
+            {noticeWarnings.length > 0 && (
+              <Alert variant="warning">
+                <Alert.Heading>Configuration Notices</Alert.Heading>
+                <p className="mb-3">
+                  Please review the following items about your strategy configuration:
+                </p>
+                <hr />
+                <div className="mt-3">
+                  {noticeWarnings.map((warning, index) => renderWarning(warning, index))}
+                </div>
+              </Alert>
+            )}
             <p className="mb-0">
               {prompt}
             </p>
