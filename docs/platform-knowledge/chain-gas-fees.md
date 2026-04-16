@@ -60,7 +60,7 @@ The `* 2` is fee slippage protection — a ceiling, not the actual price paid. T
 
 ## Gas Price Ranges
 
-Observed gas price ranges per chain, used as inputs for threshold profiling. Token prices used for USD conversion: ETH ~$2,000, AVAX ~$9 (as of March 2026 — recalculate if prices shift significantly).
+Observed gas price ranges per chain, used as inputs for threshold profiling. Token prices used for USD conversion: ETH ~$2,000, AVAX ~$9 (as of March 2026, re-confirmed April 2026 — recalculate if prices shift significantly). See MEMORY.md "Redenominate thresholds away from USD" TODO for the long-term fix to remove USD-denominated thresholds from `chains.js` and `strategies.js`.
 
 ### Arbitrum
 
@@ -128,6 +128,8 @@ Gas is constant regardless of tick range width (single NFT position). V4 uses si
 
 Note: L1 data posting cost (~$0.01–0.05) not included above. Swap gas is from V3 router — V4 swaps may differ slightly. Add liquidity is cheaper than create (~50% for V3, ~39% for V4) because it skips NFT minting — used for in-range positions only. Approvals are one-time per vault per platform.
 
+"Full rebalance" here = close + swap + create. Collect-fees gas is NOT added — fees come back as part of the close, not as a separate operation in the rebalance cycle. Standalone collect-fees measurements are in the Collect fees row above.
+
 ### Avalanche — Trader Joe V2.2 (AVAX = $9, Post-Octane)
 
 Gas scales linearly with bin count. Per-bin marginal cost: ~142k gas/bin (create), ~19k gas/bin (collect fees), ~36k gas/bin (close).
@@ -156,21 +158,25 @@ Gas scales linearly with bin count. Per-bin marginal cost: ~142k gas/bin (create
 
 Measured via Hardhat fork tests with direct vault + adapter calls (no AutomationService overhead). Gas is constant across tick widths for V3/V4 (single NFT positions). Values below are averages across ±10 and ±50 tick spacing widths.
 
-**Uniswap V3 (Arbitrum, WETH/USDC fee=500):** ~870k gas total rebalance
+**Uniswap V3 (Arbitrum, WETH/USDC fee=500):** ~870k gas total rebalance (close + swap + create)
 
-| Width | Create | Add Liq | Collect Fees | Close | Total |
+| Width | Create | Add Liq | Collect Fees | Close | Rebalance Total (close+swap+create) |
 |-------|--------|---------|-------------|-------|-------|
-| ±10 | 462k | 229k | 179k | 221k | 862k |
-| ±50 | 445k | 229k | 179k | 221k | 845k |
+| ±10 | 462k | 229k | 179k | 221k | 879k |
+| ±50 | 445k | 229k | 179k | 221k | 862k |
 | Approvals (one-time): 114k gas (2 ERC20 → NonfungiblePositionManager) |
 
-**Uniswap V4 (Arbitrum, ETH/USDC fee=500):** ~1,178k gas total rebalance
+Rebalance Total uses swap (~196k) constant. Collect-fees column is standalone measurement — not part of the rebalance cycle (fees come back during close).
 
-| Width | Create | Add Liq | Collect Fees | Close | Total |
+**Uniswap V4 (Arbitrum, ETH/USDC fee=500):** ~1,073k gas total rebalance (close + swap + create)
+
+| Width | Create | Add Liq | Collect Fees | Close | Rebalance Total (close+swap+create) |
 |-------|--------|---------|-------------|-------|-------|
-| ±10 | 585k | 356k | 284k | 280k | 1,148k |
-| ±50 | 590k | 357k | 288k | 300k | 1,178k |
+| ±10 | 585k | 356k | 284k | 280k | 1,061k |
+| ±50 | 590k | 357k | 288k | 300k | 1,086k |
 | Approvals (one-time): 109k gas (2 Permit2 flow — ERC20→Permit2 + Permit2→PositionManager, USDC only) |
+
+Rebalance Total uses swap (~196k) constant. Collect-fees column is standalone measurement — not part of the rebalance cycle (fees come back during close).
 
 V4 uses ~33% more gas than V3 due to Permit2 approval steps and PoolManager settlement actions (SETTLE/TAKE). Add liquidity (increase existing position) is ~50% cheaper than create for V3 and ~39% cheaper for V4 — it skips NFT minting. Strategy uses add liquidity only for in-range positions; rebalance always does close + create.
 
@@ -183,7 +189,10 @@ V4 uses ~33% more gas than V3 due to Permit2 approval steps and PoolManager sett
 - See bin count scaling table above — gas scales ~142k/bin for create, ~36k/bin for close
 
 **Executor balance thresholds** (derived from above, sized for worst-case gas spikes):
-- Arbitrum: min=0.002 ETH, max=0.004 ETH. V3 ~870k gas/rebalance, V4 ~1,178k gas/rebalance. At normal 0.02 gwei: ~58 V3 or ~43 V4 rebalances per max balance. At 42 gwei extreme spike: ~2 V3 or ~1.5 V4 rebalances per max balance.
+- Arbitrum: min=0.002 ETH, max=0.004 ETH. Sized against a 200 gwei spike assumption (matches `chains.js` comments). At 200 gwei:
+  - V3 (~870k gas/rebalance): 0.002 ETH covers ~11 rebalances, 0.004 ETH covers ~23 rebalances.
+  - V4 (~1,073k gas/rebalance): 0.002 ETH covers ~9 rebalances, 0.004 ETH covers ~18 rebalances.
+  At the 42 gwei observed-spike tier used in the Operation Cost tables above, a single rebalance costs 0.0365 ETH (V3) / 0.0451 ETH (V4) — more than max balance — so the threshold is sized as a buffer for sustained high-gas periods at 200 gwei, not for unbounded spikes. Reminder: Arbitrum priority fee is always 0; only the base fee matters.
 - Avalanche: min=0.04 AVAX, max=0.08 AVAX (~13/26 worst-case rebalances at 565 nAVAX pre-Octane spike; post-Octane spikes expected much lower)
 
 These values are configured as `minExecutorBalance`/`maxExecutorBalance` in chain config. See `docs/decisions/per-vault-signer.md` for the gas distribution design.

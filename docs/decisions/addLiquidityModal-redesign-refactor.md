@@ -1,7 +1,7 @@
 # Frontend Adapter Abstraction
 
-> **Status**: Analysis in progress
-> **Date**: 2026-03-19
+> **Status**: Analysis complete — implementation pending
+> **Date**: 2026-03-19 (analysis), 2026-04-16 (re-verified; AddLiquidityModal still uses V3-hardcoded `Pool.getAddress`, `slot0`, `calculatePriceFromSqrtPrice`, `tickToPrice`, `priceToTick`, `getPlatformTickSpacing`)
 
 ## Context
 

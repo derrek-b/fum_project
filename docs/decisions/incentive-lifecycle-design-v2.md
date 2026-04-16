@@ -1,9 +1,25 @@
 <!-- Source: fum_library/src/adapters/PlatformAdapter.js, fum_library/src/adapters/UniswapV3Adapter.js, fum_library/src/adapters/UniswapV4Adapter.js, fum_library/src/adapters/TraderJoeV2_2Adapter.js, fum_library/src/services/merkl.js, fum_automation/src/core/VaultDataService.js, fum_automation/src/core/AutomationService.js, fum_automation/src/strategies/babySteps/BabyStepsStrategy.js -->
 # Design: Incentive Lifecycle v2
 
-## Status: Draft — All Layers Complete
+## Status: Design complete — partially implemented
 
-Consolidated from the original incentive-lifecycle-design.md (deleted — all reference material moved here).
+Consolidated from the original incentive-lifecycle-design.md (deleted — all reference material moved here). All six layers below are **design-complete**. Implementation is partial — see the "Implementation Status (as of 2026-04-16)" section immediately below for what's landed vs. pending.
+
+## Implementation Status (as of 2026-04-16)
+
+| Component | Status | Where |
+|---|---|---|
+| `MerklIncentiveValidator` contract | Landed | `fum/contracts/validators/MerklIncentiveValidator.sol` |
+| `VaultFactory.incentiveValidators` registry + `setIncentiveValidator` | Landed | `fum/contracts/VaultFactory.sol` |
+| `PositionVault.incentive(targets, data, values)` entry point | Landed | `fum/contracts/PositionVault.sol` |
+| Strategy-level `transactionType: 'incentive'` routing | Landed | `fum_automation/src/strategies/base/StrategyBase.js` |
+| `UniswapV4Adapter.getPoolIncentives` + Merkl service | Landed | `fum_library/src/adapters/UniswapV4Adapter.js`, `fum_library/src/services/merkl.js` |
+| V3 Staker / TJ rewarder / Camelot / Aerodrome adapter methods | Not started | — |
+| Strategy orchestration (Layer 3 flows, `stakingState`, `incentiveKey` on positions) | Not started | — |
+| Tracker event handlers + metadata aggregates (Layer 6) | Not started | — |
+| Frontend manual unstake / pending-claims / failed-reward-distributions UI (3.7, 6) | Not started | — |
+
+The `Status: Complete` labels on individual Layer sections below refer to **design status**, not implementation.
 
 ## Overview
 
@@ -308,7 +324,7 @@ closePositions(vault, positions):
 
 - **Single distribution phase**: Phase 5 handles rewards from both staking (Phase 1) and auto-tracking (Phase 4). A pool is one model or the other, so only one source produces rewards per close, but the distribution code path is the same regardless.
 
-Status: **Complete**
+Design status: **Complete** (implementation: see table at top)
 
 #### 3.3 Post-create deposit+stake (staking model)
 
@@ -336,7 +352,7 @@ After creating a new position in an incentivized pool with staking model, stake 
 
 - **Failure is non-blocking**: If the stake fails, the position is live and earning trading fees — just not earning incentive rewards. See Layer 5 for retry strategy.
 
-Status: **Complete**
+Design status: **Complete** (implementation: see table at top)
 
 #### 3.4 Pre/post addToPosition unstake and restake (staking model)
 
@@ -387,7 +403,7 @@ addToPosition(vault, position, ...):
 
 - **Failure handling**: Pre-add unstake failure is a blocker — can't add liquidity to a staked position. Post-add restake failure is non-blocking — position is live and earning fees, just not earning incentive rewards. See Layer 5.
 
-Status: **Complete**
+Design status: **Complete** (implementation: see table at top)
 
 #### 3.5 Campaign expiry with staked positions
 
@@ -399,7 +415,7 @@ No proactive handling needed. Campaign expiry is detected naturally — the next
 
 Proactively unstaking during `handleSwapEvent` just because a campaign expired was considered and rejected — it would require implementing a full incentive cycle (unstake, distribute rewards, check for new campaigns, potentially restake) without any immediate benefit, since the position is still earning trading fees while staked. The natural triggers handle it cleanly.
 
-Status: **Complete**
+Design status: **Complete** (implementation: see table at top)
 
 #### 3.6 Fee collection for staked positions (handleSwapEvent)
 
@@ -423,7 +439,7 @@ if (position.stakingState && poolMetadata.incentives.feeCollection !== 'native')
 
 **The `unstake-required` vs `redirected` distinction** doesn't matter for the fee collection decision (both skip), but matters elsewhere: fee reporting (`getAccruedFeesUSD` shows accumulated fees for `unstake-required`, 0 for `redirected`) and the future stake-or-don't decision (staking is additive for `unstake-required` but a tradeoff for `redirected`).
 
-Status: **Complete**
+Design status: **Complete** (implementation: see table at top)
 
 #### 3.7 Staked positions on vault auth revoked (offboarding)
 
@@ -435,7 +451,7 @@ The automation service **cannot** unstake on offboard — auth is revoked on-cha
 
 **On offboard, the automation service should**: Log/notify (Telegram) that staked positions exist in the vault so the user is aware they need to manually unstake. No on-chain action.
 
-Status: **Complete** (frontend implementation deferred to frontend refactor)
+Design status: **Complete** — frontend implementation deferred to frontend refactor (implementation: see table at top)
 
 Note: Trading fees continue to accrue while staked (fee accrual is pool-level). Fees can't be *collected* until unstaked, but they're not lost.
 
@@ -501,7 +517,7 @@ This keeps each vault function scoped to its operation type. `incentive()` handl
 
 **Note**: `PositionVault.onlyAuthorized` allows both the vault owner and the authorized executor. The frontend manual unstake (3.7) works through `vault.incentive()` without contract changes.
 
-Status: **Complete**
+Design status: **Complete** (implementation: see table at top)
 
 ---
 
@@ -624,7 +640,7 @@ On successful distribution (whether automated retry or manual), remove the entry
 
 **Implementation note**: Each step of the 50 swap health check must be independently try-caught. A failure in step 2 (staking check) must not prevent steps 3 (pending claims) and 4 (failed distributions) from running.
 
-Status: **Complete**
+Design status: **Complete** (implementation: see table at top)
 
 ---
 
@@ -902,7 +918,7 @@ The frontend reads `metadata.json` directly for two actionable surfaces:
 
 Both surfaces are read-only from Tracker's perspective. The frontend calls the vault directly, and if automation is active, the next health check cleans up the metadata entry after success.
 
-Status: **Complete**
+Design status: **Complete** (implementation: see table at top)
 
 ---
 

@@ -39,7 +39,8 @@ fum ──(contract sync scripts)──> fum_testing, fum_automation, fum_librar
 cd fum && npm run dev              # Next.js dev server
 cd fum && npm run contracts:sync   # Sync contracts to all projects
 cd fum && npm run contracts:test   # Sync + run Hardhat tests
-cd fum && npm run hardhat          # Start local node + deploy contracts + update fum_library addresses
+cd fum && npm run hardhat          # Start Arbitrum fork (chain 1337, port 8545) + deploy + update fum_library
+cd fum && npm run hardhat:av       # Start Avalanche fork (chain 1338, port 8546) + deploy + update fum_library
 cd fum && npm run seed-localhost   # Create test vault + seed data
 ```
 
@@ -52,7 +53,8 @@ cd fum_library && npm test         # Vitest unit tests
 
 ### fum_automation
 ```bash
-cd fum_automation && npm run start           # Start automation service
+cd fum_automation && npm run start           # Start automation service (defaults to .env.local, Arbitrum)
+cd fum_automation && npm run start:av        # Start automation against Avalanche fork (uses .env.local.av)
 cd fum_automation && npm test                # All tests
 cd fum_automation && npm run test:v3:run-all # Uniswap V3 workflow tests
 cd fum_automation && npm run test:v4:run-all # Uniswap V4 workflow tests
@@ -88,12 +90,15 @@ cd fum_testing && npx hardhat node       # Start local node
 - `fum_library/artifacts` — Contract ABIs and deployment addresses
 
 ### Automation Service (fum_automation/src/)
-Event-driven architecture with these layers:
+Event-driven architecture. Modules in `src/core/`:
 1. **AutomationService** — Orchestration: vault discovery, strategy allocation, processing loop
 2. **VaultDataService** — Data layer: vault state, position tracking, token balances
-3. **Strategies** — StrategyBase → BabyStepsStrategy / ParrisIslandStrategy. Each strategy handles evaluation (is position in range?), rebalancing, fee collection, and position creation.
+3. **Strategies** — StrategyBase → BabyStepsStrategy / ParrisIslandStrategy. Each strategy handles evaluation (is position in range?), rebalancing, fee collection, and position creation. Lives under `src/strategies/`.
 4. **EventManager** — Centralized pub/sub for system events (PositionRebalanced, FeesCollected, NewPositionCreated, etc.)
 5. **Tracker** — Transaction history and performance tracking
+6. **VaultHealth** — Executor gas monitoring and automated top-ups (holdback + funding-required state)
+7. **ServiceHealth** — WebSocket subscription canary with ping/pong keepalive
+8. **SSEBroadcaster** — Real-time update stream to frontend clients (Server-Sent Events)
 
 Detailed architecture docs: `fum_automation/docs/architecture/`
 
@@ -132,7 +137,7 @@ Contracts live in `fum/contracts/` as the source of truth. Scripts in `fum/scrip
 
 Cross-cutting docs that don't belong to a single subproject live in `docs/`:
 - `docs/decisions/` — Architecture decisions and the "why" behind them
-- `docs/platform-knowledge/` — DEX-specific quirks and gotchas (Uniswap V2/V3/V4, Trader Joe V2.2)
+- `docs/platform-knowledge/` — DEX-specific quirks and gotchas (Uniswap V3/V4, Trader Joe V2.2). V2 swap event shape is documented there for AlphaRouter cross-version routing, but V2 is not a first-class supported platform.
 
 Per-project docs:
 - `fum/docs/architecture/` — Contract system, validator pattern, frontend architecture, scripts pipeline

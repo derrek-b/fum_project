@@ -27,10 +27,12 @@ const path = {
 
 ## Native Token Handling
 
-Native AVAX uses `AddressZero` in token paths, not the wrapped address. The helper `getTokenAddressForTJ()` handles this:
+Native AVAX uses `AddressZero` in token paths, not the wrapped address. The mapping is:
 - Native (AVAX) → `ethers.constants.AddressZero`
 - Wrapped (WAVAX) → actual token address
 - Everything else → actual token address
+
+The adapter (`fum_library/src/adapters/TraderJoeV2_2Adapter.js`) does this inline in swap path construction. A standalone helper with the same behavior lives at `fum_automation/test/helpers/traderjoe-swap-utils.js:getTokenAddressForTJ()` for test code; if a future refactor wants to share it, lift it into `fum_library/src/helpers/`.
 
 ## Fee Model: Auto-Compounding (V2.2)
 
