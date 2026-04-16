@@ -15,7 +15,7 @@ StrategyBase (src/strategies/base/StrategyBase.js)
 
 ## StrategyBase Interface
 
-**Source:** `src/strategies/base/StrategyBase.js` (431 lines)
+**Source:** `src/strategies/base/StrategyBase.js`
 
 ### Constructor Dependencies
 
@@ -37,6 +37,10 @@ constructor(dependencies) {
 }
 ```
 
+**Post-construction dependencies** (set by `AutomationService.updateStrategyDependencies()`):
+- `this.hdNode` — ethers HDNode from `AUTOMATION_MNEMONIC`, used by `getVaultSigner()` to derive per-vault signing keys
+- `this.vaultHealth` — VaultHealth instance, used by `applyHoldbackDeduction()` for gas holdback calculations
+
 ### Required Methods (must implement)
 
 | Method | Signature | Called By |
@@ -55,13 +59,15 @@ constructor(dependencies) {
 | `executeWrap(vault, amount)` | Wrap native to wrapped native (ETH→WETH, AVAX→WAVAX). Emits `NativeWrapped`. |
 | `executeUnwrap(vault, amount)` | Unwrap wrapped native to native. Emits `NativeUnwrapped`. |
 | `buildSwapDetails(swapMetadata, actualSwaps)` | Combine quoted and actual swap data into unified details array. |
+| `applyHoldbackDeduction(vault, token0Data, token1Data, token0Balance, token1Balance, token0Price, token1Price)` | Deducts gas holdback from token balances before position operations. Returns `{ token0Balance, token1Balance }`. |
+| `getVaultSigner(vault)` | Derives child key `m/44'/60'/0'/0/{vault.executorIndex}` from hdNode. Returns ethers.Wallet connected to provider. |
 | `log(message, ...args)` | Debug logging with `[ClassName]` prefix. |
 
 ### Transaction Execution
 
 `executeBatchTransactions` is the primary mechanism for on-chain operations. It:
 1. Extracts targets/calldatas/values from transaction array
-2. Gets vault contract, creates signer from `AUTOMATION_PRIVATE_KEY`
+2. Gets vault contract, derives signer from `AUTOMATION_MNEMONIC` via HD path `m/44'/60'/0'/0/{executorIndex}`
 3. Estimates gas via role-specific vault function (`swap`, `approve`, `mint`, etc.)
 4. Executes with retry (1 retry, 500ms delay)
 5. Emits `BatchTransactionExecuted` event with gas efficiency metrics
@@ -74,6 +80,7 @@ Vault contract functions map to types:
 - `decreaseLiquidity(targets, data)` — remove liquidity
 - `collect(targets, data)` — collect fees
 - `burn(targets, data)` — burn position NFT
+- `incentive(targets, calldatas, values)` — claim incentive rewards
 
 ## BabyStepsStrategy
 
@@ -110,13 +117,34 @@ If one target token has excess and the other still has a deficit, swaps the exce
 
 Stored in `vault.strategy.parameters` (see [Cache Structures](./cache-structures.md)):
 - `targetRangeUpper/Lower` — target range in basis points
-- `rebalanceThresholdUpper/Lower` — rebalance trigger in basis points
 - `feeReinvestment` — boolean
-- `reinvestmentTrigger` — minimum fee value (wei string)
+- `reinvestmentTrigger` — minimum fee value (wei string, USD-denominated)
 - `reinvestmentRatio` — reinvestment percentage in basis points
 - `maxSlippage` — max slippage in basis points
 - `emergencyExitTrigger` — emergency exit threshold in basis points
-- `maxUtilization` — max vault utilization in basis points
+
+### Events Emitted
+
+BabyStepsStrategy emits events via `this.eventManager.emit()` during its lifecycle:
+
+| Event | When |
+|---|---|
+| `BestPoolSelected` | After selecting optimal pool for vault's target tokens |
+| `DeploymentCalculated` | After calculating token amounts for position deployment |
+| `FeeDistributionFailed` | When fee distribution to vault owner fails |
+| `FeeTrackingFailed` | When fee tracking/recording fails |
+| `FeesCollected` | After successfully collecting position fees |
+| `FeesDistributed` | After distributing collected fees to vault owner |
+| `InitialPositionsEvaluated` | After evaluating existing positions during vault initialization |
+| `LiquidityAddedToPosition` | After adding liquidity to an existing position |
+| `NewPositionCreated` | After creating a new concentrated liquidity position |
+| `PositionRebalanced` | After rebalancing an out-of-range position |
+| `PositionsClosed` | After closing one or more positions |
+| `TokenPreparationCompleted` | After token preparation phases finish |
+| `TokensSwapped` | After executing token swaps (deficit coverage or excess balancing) |
+| `VaultPositionChecksCleared` | After all position health checks pass |
+
+StrategyBase also emits: `NativeWrapped`, `NativeUnwrapped`, `BatchTransactionExecuted`.
 
 ## Adding a New Strategy
 

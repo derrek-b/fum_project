@@ -16,12 +16,13 @@ new AutomationService({
   retryIntervalMs,           // number, default 300000 (5 min) — failed vault retry interval
   maxFailureDurationMs,      // number, default 3600000 (1 hr) — max time in retry queue before blacklist
   ssePort,                   // number, default 3001
-  dataDir                    // string, default './data' — base dir for all data files
+  dataDir,                   // string, default './data' — base dir for all data files
                              //   derives: blacklist.json, vaults/, trackingFailures.json
+  vaultHealthIntervalMs      // number, default 300000 (5 min) — VaultHealth balance check interval
 })
 ```
 
-Creates: EventManager, VaultDataService, Tracker, SSEBroadcaster, BabyStepsStrategy (`'bob'`).
+Creates: EventManager, VaultDataService, Tracker, VaultHealth, ServiceHealth, SSEBroadcaster, BabyStepsStrategy (`'bob'`).
 
 ## Lifecycle
 

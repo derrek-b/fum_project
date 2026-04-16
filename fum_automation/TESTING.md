@@ -14,22 +14,46 @@ test/
 ├── shared-state.js          # State sharing between globalSetup and tests
 ├── setup.js                 # Per-test setup (loads env, initializes fum_library)
 ├── helpers/
-│   ├── hardhat-setup.js     # Connects to shared Hardhat, reverts to snapshot
-│   └── test-vault-setup.js  # Test vault creation utilities
+│   ├── hardhat-setup.js     # V3/general: connects to shared Hardhat, reverts to snapshot
+│   ├── v4-hardhat-setup.js  # V4-specific Hardhat setup (hardcoded chainId, different SSE port)
+│   ├── swap-utils.js        # V3 swap simulation helpers
+│   ├── v4-swap-utils.js     # V4 swap simulation helpers
+│   ├── traderjoe-swap-utils.js  # Trader Joe swap simulation helpers
+│   ├── test-vault-setup.js  # V3 vault creation and position setup
+│   ├── v4-vault-setup.js    # V4 vault creation and position setup
+│   ├── traderjoe-vault-setup.js  # Trader Joe vault creation and position setup
+│   ├── executor-utils.js    # Executor funding and gas utilities
+│   ├── tracker-assertions.js  # Transaction history assertion helpers
+│   └── wait-utils.js        # Async event and timing wait helpers
 ├── unit/                    # Fast, isolated unit tests
-│   ├── AutomationService.config.test.js
-│   └── utilities.test.js
-├── workflow/                # Integration tests with real blockchain
-│   ├── service-init/        # Service initialization scenarios
-│   ├── service-stop/        # Graceful shutdown tests
-│   ├── swap-event/          # Swap detection and rebalancing
-│   ├── vault-auth/          # Vault authorization workflow
-│   ├── vault-revoke/        # Vault revocation workflow
-│   └── native-eth/          # Native ETH handling tests
-└── scenarios/               # JSON configs for custom test scenarios
-    ├── README.md            # Scenario configuration reference
-    ├── default.json
-    └── *.json
+│   ├── BlacklistManager.test.js
+│   ├── EventManager.test.js
+│   ├── RetryHelper.test.js
+│   ├── ServiceHealth.test.js
+│   ├── Tracker.test.js
+│   ├── VaultDataService.test.js
+│   ├── VaultHealth.test.js
+│   ├── errors.test.js
+│   └── patchProviderFeeData.test.js
+└── workflow/                # Integration tests with real blockchain
+    ├── config-update/       # Strategy parameter change handling
+    ├── error-handling/      # Recovery, failure, and edge case scenarios
+    ├── executor-funding/    # Executor gas top-up workflows
+    ├── service-init/        # Service initialization and vault setup flows
+    ├── service-stop/        # Graceful shutdown tests
+    ├── swap-event/          # Swap detection and rebalancing
+    ├── traderjoe/           # Trader Joe V2.2 workflows (FORK_CHAIN=avalanche)
+    │   ├── execution/
+    │   ├── service-init/
+    │   └── gas-profiling.test.js
+    ├── v4/                  # Uniswap V4 workflows
+    │   ├── error-handling/
+    │   ├── execution/
+    │   ├── service-init/
+    │   └── gas-profiling.test.js
+    ├── vault-auth/          # Vault authorization grant + revoke
+    ├── vault-setup/         # Vault initialization edge cases
+    └── v3-gas-profiling.test.js  # V3 gas usage benchmarks
 ```
 
 ## Test Architecture
@@ -91,7 +115,7 @@ ALCHEMY_API_KEY=your_alchemy_api_key
 COINGECKO_API_KEY=your_coingecko_api_key
 ```
 
-> **Note:** Other `.env.local` variables (CHAIN_ID, WS_URL, AUTOMATION_PRIVATE_KEY, etc.) are for running the service for full ecosystem integration testing, not for unit or workflow tests.
+> **Note:** Other `.env.local` variables (CHAIN_ID, WS_URL, AUTOMATION_MNEMONIC, etc.) are for running the service for full ecosystem integration testing, not for unit or workflow tests.
 
 ### Dependencies
 
@@ -118,9 +142,10 @@ npm test
 npm test test/unit
 ```
 
-Unit tests are fast (~2-3 seconds) and don't require a blockchain connection. They test:
-- Configuration validation (`AutomationService.config.test.js`)
-- Utility functions: RetryHelper, Logger, Tracker (`utilities.test.js`)
+Unit tests are fast (~2-3 seconds) and don't require a blockchain connection. They cover:
+- Core services: EventManager, VaultDataService, Tracker, VaultHealth, ServiceHealth
+- Utilities: RetryHelper, errors, patchProviderFeeData
+- BlacklistManager
 
 ### Workflow Tests Only
 
@@ -133,7 +158,7 @@ Workflow tests connect to the shared Hardhat fork of Arbitrum, revert to clean s
 ### Specific Test File
 
 ```bash
-npm test test/workflow/service-init/BS-0vaults.test.js
+npm test test/workflow/service-init/BS-0000.test.js
 ```
 
 ### Watch Mode
@@ -150,37 +175,39 @@ npm run test:coverage
 
 ## Test Naming Convention
 
-Workflow tests follow a naming pattern that describes the test scenario:
+Service-init workflow tests follow a naming pattern that encodes the vault's initial state:
 
 ```
-BS-{vaults}-{config}.test.js
+BS-XYZW.test.js
 ```
 
 Where:
 - **BS** = Baby Steps strategy
-- **vaults** = Number of vaults (e.g., `0vaults`, `1vault`)
-- **config** = 4-digit configuration code
+- **XYZW** = 4-digit configuration code
 
-### Configuration Code (XXXX)
+### Configuration Code (XYZW)
 
 Each digit represents a count:
 
 | Position | Meaning |
 |----------|---------|
-| 1st | Aligned positions |
-| 2nd | Non-aligned positions |
-| 3rd | Aligned tokens |
-| 4th | Non-aligned tokens |
+| X (1st) | Aligned positions |
+| Y (2nd) | Non-aligned positions |
+| Z (3rd) | Aligned tokens (non-position balances) |
+| W (4th) | Non-aligned tokens (non-position balances) |
 
 ### Examples
 
 | Test Name | Meaning |
 |-----------|---------|
-| `BS-0vaults` | No vaults, tests empty initialization |
-| `BS-1vault-1111` | 1 aligned pos, 1 non-aligned pos, 1 aligned token, 1 non-aligned token |
-| `BS-1vault-0202` | 0 aligned pos, 2 non-aligned pos, 0 aligned tokens, 2 non-aligned tokens |
-| `BS-1vault-2020` | 2 aligned pos, 0 non-aligned pos, 2 aligned tokens, 0 non-aligned tokens |
-| `BS-1vault-1020` | 1 aligned pos, 0 non-aligned pos, 2 aligned tokens, 0 non-aligned tokens |
+| `BS-0000` | No positions, no tokens — empty vault initialization |
+| `BS-0010` | 0 aligned pos, 0 non-aligned pos, 1 aligned token, 0 non-aligned |
+| `BS-0012` | 0 positions, 1 aligned token, 2 non-aligned tokens |
+| `BS-0100` | 1 non-aligned position, no tokens |
+| `BS-1000` | 1 aligned position, no extra tokens |
+| `BS-1212` | 1 aligned pos, 2 non-aligned pos, 1 aligned token, 2 non-aligned |
+
+Additional test files: `basic-init.test.js` (basic startup), `init-errors.test.js` (error handling during init), `BS-0012-phase2.test.js` (phase 2 token preparation).
 
 ### Aligned vs Non-Aligned
 
@@ -218,56 +245,53 @@ Tests swap detection and rebalancing:
 
 ### vault-auth/
 
-Tests runtime vault authorization:
+Tests runtime vault authorization and revocation:
 - Detecting new vault authorizations via events
 - Loading and setting up newly authorized vaults
 - Position creation for new vaults
+- Detecting revocation events and cleaning up vault monitoring
 
-### vault-revoke/
+### config-update/
 
-Tests vault revocation handling:
-- Detecting revocation events
-- Cleaning up vault monitoring
-- Removing vault from active management
+Tests strategy parameter changes at runtime:
+- Handling TargetTokensUpdated and TargetPlatformsUpdated events
+- Re-evaluating positions after config changes
 
-### native-eth/
+### error-handling/
 
-Tests native ETH handling:
-- Vault setup with native ETH instead of WETH
-- Fee distribution as native ETH
-- ETH wrapping/unwrapping during operations
+Tests recovery, failure, and edge case scenarios:
+- Blacklist management and retry
+- Emergency exit triggers
+- Provider reconnection and subscription recovery
+- Swap event and auth event failures
+- Setup retry and retry queue cleanup
+- Executor funding error paths
+- Ownership verification edge cases
 
-## Custom Test Scenarios
+### executor-funding/
 
-For testing specific vault configurations without writing code, use the configurable test with JSON scenarios.
+Tests executor gas management:
+- Automated top-ups from vault holdbacks
+- Funding-required state detection
 
-### Running a Custom Scenario
+### vault-setup/
 
-```bash
-# Default scenario
-npm test test/workflow/service-init/BS-configurable
+Tests vault initialization edge cases:
+- Setup error handling and recovery
 
-# Custom scenario
-SCENARIO=test/scenarios/my-scenario.json npm test test/workflow/service-init/BS-configurable
-```
+### v4/
 
-### Creating Scenarios
+Uniswap V4-specific workflow tests:
+- V4 service initialization and position creation
+- V4 execution flows
+- V4 gas profiling
 
-See [test/scenarios/README.md](test/scenarios/README.md) for complete documentation on:
-- Scenario file structure
-- Position configuration options
-- Tick range types
-- Token transfers
-- Example scenarios
+### traderjoe/
 
-### Pre-Made Scenarios
-
-| File | Description |
-|------|-------------|
-| `default.json` | Simple 1-position aligned scenario |
-| `0202.json` | All non-aligned (migration test) |
-| `1111.json` | Mixed aligned/non-aligned |
-| `2020.json` | All aligned |
+Trader Joe V2.2-specific workflow tests (run with `FORK_CHAIN=avalanche`):
+- TJ service initialization and bin-based position creation
+- TJ execution flows
+- TJ gas profiling
 
 ## Test Helper Files
 
@@ -286,7 +310,7 @@ Utility for sharing state between globalSetup (separate process) and test files:
 - `loadSharedState()` - Loads state for test files
 - `clearSharedState()` - Cleans up state file
 
-### hardhat-setup.js
+### hardhat-setup.js / v4-hardhat-setup.js
 
 Provides `setupTestBlockchain()` which:
 - Connects to the shared Hardhat instance
@@ -294,14 +318,32 @@ Provides `setupTestBlockchain()` which:
 - Syncs blockchain timestamp with real time
 - Returns test environment with signers, contracts, and config
 
-### test-vault-setup.js
+`v4-hardhat-setup.js` is the V4 variant with hardcoded chainId and different SSE port.
 
-Provides `setupTestVault()` which:
+### test-vault-setup.js / v4-vault-setup.js / traderjoe-vault-setup.js
+
+Platform-specific vault setup helpers:
 - Creates a vault via VaultFactory
-- Wraps ETH and performs token swaps
-- Creates Uniswap V3 positions
+- Wraps native tokens and performs swaps to get target tokens
+- Creates positions on the target platform (V3 concentrated, V4 concentrated, or TJ bin-based)
 - Transfers assets to vault
 - Authorizes vault with strategy
+
+### swap-utils.js / v4-swap-utils.js / traderjoe-swap-utils.js
+
+Platform-specific swap simulation helpers for triggering price movements in tests.
+
+### executor-utils.js
+
+Executor funding and gas management utilities for testing top-up workflows.
+
+### tracker-assertions.js
+
+Assertion helpers for validating transaction history entries in Tracker.
+
+### wait-utils.js
+
+Async wait helpers for event-driven test coordination (waiting for event handler completion, timing utilities).
 
 ## Writing New Tests
 

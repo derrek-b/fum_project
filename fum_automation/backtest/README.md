@@ -25,12 +25,12 @@ Tools for collecting historical swap data and backtesting FUM automation strateg
 
 **Default (5 runs):**
 ```bash
-npm run collect:swaps:weth-usdc
+npm run collect:events:weth-usdc
 ```
 
 **Custom number of runs:**
 ```bash
-npm run collect:swaps:weth-usdc -- --runs 10
+npm run collect:events:weth-usdc -- --runs 10
 ```
 
 ### How It Works
@@ -105,12 +105,12 @@ To collect data for a different pool:
 
 3. **Add npm script to `package.json`:**
    ```json
-   "collect:swaps:token0-token1": "node backtest/collectors/collect-v3-swaps.js --chain 42161 --tokens TOKEN0 TOKEN1 --fee 500"
+   "collect:events:token0-token1": "node backtest/collectors/collect-v3-events.js --chain 42161 --tokens TOKEN0 TOKEN1 --fee 500"
    ```
 
 4. **Run the collector:**
    ```bash
-   npm run collect:swaps:token0-token1
+   npm run collect:events:token0-token1
    ```
 
 **Note:** See `backtest/templates/README.md` for platform-specific template details.
@@ -186,7 +186,8 @@ backtest/data/prices/USDC.json
 backtest/
 ├── README.md                    # This file
 ├── collectors/                  # Data collection scripts
-│   ├── collect-v3-swaps.js     # Uniswap V3 swap collector
+│   ├── collect-v3-events.js    # Uniswap V3 event collector (swaps, mints, burns)
+│   ├── collect-v3-swaps.js    # Uniswap V3 swap collector (legacy)
 │   └── collect-prices.js       # Token price collector
 ├── templates/                   # Templates for creating swap data files
 │   ├── README.md               # Platform-specific template docs

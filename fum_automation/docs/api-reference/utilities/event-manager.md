@@ -45,6 +45,8 @@ No arguments. Dependencies injected via `setPoolData()`, `setAdapters()`, `setVa
 | `subscribeToAuthorizationEvents(provider, address, chainId)` | Monitor ExecutorChanged on VaultFactory |
 | `subscribeToStrategyParameterEvents(addresses, provider, chainId)` | Monitor ParameterUpdated on strategy contracts |
 
+> **Note:** ServiceHealth uses `provider.on('block', ...)` (ethers.js v5 wrapper over `eth_subscribe newHeads`) for its subscription canary — this is managed directly by ServiceHealth, not via EventManager subscriptions.
+
 ## Pool-to-Vault Mapping
 
 | Method | Description |

@@ -41,7 +41,7 @@ Called automatically via EventManager subscriptions:
 | `handleTokensSwapped(data)` | `TokensSwapped` |
 | `handleNewPositionCreated(data)` | `NewPositionCreated` |
 | `handleLiquidityAddedToPosition(data)` | `LiquidityAddedToPosition` |
-| `handleWrapUnwrap(data, type)` | `ETHWrapped` / `ETHUnwrapped` |
+| `handleWrapUnwrap(data, type)` | `NativeWrapped` / `NativeUnwrapped` |
 | `handleVaultBlacklisted(data)` | `VaultBlacklisted` |
 | `handleVaultRetryQueued(data)` | `VaultFailed` |
 | `handleVaultRetrySuccess(data)` | `VaultRecovered` |

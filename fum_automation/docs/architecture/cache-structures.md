@@ -78,13 +78,22 @@ this.vaultLocks = {
 
 ### `this.poolData` - Pool Data Cache
 **Type**: `Object`
-**Key**: Normalized pool address (checksummed)
+**Key**: Platform-dependent (see table below)
 **Purpose**: Centralized pool metadata cache - only stable, non-time-sensitive data
+
+**Pool identifier types by platform:**
+
+| Platform | Key Type | Example |
+|----------|----------|---------|
+| Uniswap V3 | Checksummed Ethereum address | `'0xC31E54c7a869B9FcBEcc14363CF510d1c41fa443'` |
+| Uniswap V4 | bytes32 keccak256 hash of PoolKey | `'0x8a34b3...'` (NOT an address — cannot use `ethers.utils.getAddress()`) |
+| Trader Joe V2.2 | Lowercase LBPair address | `'0xa3c4e6...'` |
+
+#### Uniswap V3 Pool Metadata
 
 ```javascript
 this.poolData = {
   '0xPoolAddress123456789012345678901234567890': {
-    // Pool metadata only (stable data - populated via PoolDataFetched events)
     token0Symbol: 'USDC',
     token1Symbol: 'WETH',
     fee: 3000,
@@ -93,10 +102,47 @@ this.poolData = {
 }
 ```
 
+#### Uniswap V4 Pool Metadata
+
+```javascript
+this.poolData = {
+  '0x8a34b3...': {                          // bytes32 poolId (keccak256 of PoolKey)
+    token0Symbol: 'USDC',
+    token1Symbol: 'WETH',
+    fee: 3000,
+    tickSpacing: 60,                         // tick spacing for the pool
+    hooks: '0x0000000000000000000000000000000000000000', // hook contract address
+    platform: 'uniswapV4',
+    poolKey: {                               // full PoolKey struct for contract calls
+      currency0: '0xCurrency0Address...',
+      currency1: '0xCurrency1Address...',
+      fee: 3000,
+      tickSpacing: 60,
+      hooks: '0x0000000000000000000000000000000000000000'
+    }
+  }
+}
+```
+
+#### Trader Joe V2.2 Pool Metadata
+
+```javascript
+this.poolData = {
+  '0xa3c4e6...': {                          // lowercase LBPair address
+    token0Symbol: 'USDC',
+    token1Symbol: 'WAVAX',
+    binStep: 20,                             // bin step (NOT fee — TJ uses bin-based pricing)
+    platform: 'traderjoeV2_2'
+  }
+}
+```
+
 **Important Notes**:
 - **Only metadata is cached** - no time-sensitive data (tick, liquidity, sqrtPriceX96, fee growth values)
 - **Time-sensitive data is always fetched fresh** when needed for calculations
 - **Pool metadata is populated via PoolDataFetched events** during vault loading, not during service initialization
+- **V4 poolId is NOT an Ethereum address** - it is a bytes32 hash computed from `keccak256(abi.encode(currency0, currency1, fee, tickSpacing, hooks))`
+- **TJ uses `binStep` instead of `fee`** - do not assume all pool metadata has a `fee` field
 
 ### `this.strategies` - Strategy Class Instances
 **Type**: `Map<string, Object>`
@@ -192,6 +238,14 @@ this.pendingConfigUpdates = Map {
 - Processed on `VaultUnlocked` event via `processPendingConfigUpdates()`
 - Cleared on vault cleanup/blacklist via `clearPendingConfigUpdates()`
 
+### `this.pendingOffboards` - Deferred Vault Offboards
+**Type**: `Set<string>`
+**Purpose**: Vault addresses awaiting offboard after unlock. When a `VaultAuthRevoked` event fires while the vault is locked (operation in progress), the address is added here instead of offboarding immediately. On `VaultUnlocked`, the handler checks this set first — if present, re-locks the vault, offboards it, and emits `VaultOffboarded` with `deferred: true`.
+
+### VaultHealth Caches
+
+VaultHealth maintains its own internal cache structures for executor gas monitoring. See [VaultHealth API Reference](../api-reference/core/vault-health.md#internal-state) for details on `holdbacks`, `managedVaults`, `fundingRequired`, and `pendingTopUp`.
+
 ---
 
 ## VaultDataService Cache Structures
@@ -214,17 +268,15 @@ this.pendingConfigUpdates = Map {
     strategy: {
       strategyId: 'bob',
       strategyAddress: '0xStrategyContractAddress...',
+      // Parameters vary by strategy — these are for 'bob' (Baby Steps)
       parameters: {
-        targetRangeUpper: 500,           // basis points
-        targetRangeLower: 500,           // basis points
-        rebalanceThresholdUpper: 150,    // basis points
-        rebalanceThresholdLower: 150,    // basis points
+        targetRangeUpper: 500,           // basis points (5.0%)
+        targetRangeLower: 500,           // basis points (5.0%)
         feeReinvestment: true,           // boolean
-        reinvestmentTrigger: '50000000000000000000', // wei
-        reinvestmentRatio: 8000,         // basis points
-        maxSlippage: 50,                 // basis points
-        emergencyExitTrigger: 1500,      // basis points
-        maxUtilization: 8000             // basis points
+        reinvestmentTrigger: '50000000000000000000', // wei (USD $50.00)
+        reinvestmentRatio: 8000,         // basis points (80%)
+        maxSlippage: 50,                 // basis points (0.5%)
+        emergencyExitTrigger: 1500       // basis points (15%)
       }
     },
 
@@ -239,32 +291,9 @@ this.pendingConfigUpdates = Map {
     targetPlatforms: ['uniswapV3'],
 
     // Positions (object-keyed by position ID)
+    // ⚠️ Position shape varies by platform — see platform-specific sections below
     positions: {
-      '12345': {
-        id: '12345',
-        pool: '0xPoolAddress123...',           // pool contract address
-        tickLower: -887220,                    // lower tick boundary
-        tickUpper: 887220,                     // upper tick boundary
-        liquidity: '1000000000000000000',      // position liquidity as string
-        // Fee tracking fields (stable - only change on position interaction)
-        feeGrowthInside0LastX128: '123456789...', // fee growth snapshot for token0
-        feeGrowthInside1LastX128: '987654321...', // fee growth snapshot for token1
-        tokensOwed0: '0',                      // uncollected fees for token0
-        tokensOwed1: '0',                      // uncollected fees for token1
-        lastUpdated: 1703123456789             // timestamp when position was last updated
-      },
-      '67890': {
-        id: '67890',
-        pool: '0xPoolAddress456...',
-        tickLower: -60000,
-        tickUpper: 60000,
-        liquidity: '500000000000000000',
-        feeGrowthInside0LastX128: '...',
-        feeGrowthInside1LastX128: '...',
-        tokensOwed0: '0',
-        tokensOwed1: '0',
-        lastUpdated: 1703123456789
-      }
+      '12345': { /* ... platform-dependent fields ... */ }
     },
 
     // Metadata
@@ -279,6 +308,75 @@ this.pendingConfigUpdates = Map {
 - `removeVault(address)` - Remove vault from cache
 - `getAllVaults()` - Get array of all cached vaults
 - `clearCache()` - Clear all cached vaults
+
+### Position Shapes by Platform
+
+Position data is stored in `vault.positions` keyed by position ID (string). The shape differs by platform. The `pool` field's type also varies (see poolData section above).
+
+#### Uniswap V3 Position
+
+Source: `UniswapV3Adapter.js` `getPositionData()`
+
+```javascript
+{
+  id: '12345',                               // NFT token ID (string)
+  pool: '0xPoolAddress123...',               // checksummed pool address
+  tickLower: -887220,                        // lower tick boundary (number)
+  tickUpper: 887220,                         // upper tick boundary (number)
+  liquidity: '1000000000000000000',          // position liquidity (string)
+  feeGrowthInside0LastX128: '123456789...',  // fee growth snapshot for token0 (string)
+  feeGrowthInside1LastX128: '987654321...',  // fee growth snapshot for token1 (string)
+  tokensOwed0: '0',                          // uncollected fees for token0 (string)
+  tokensOwed1: '0',                          // uncollected fees for token1 (string)
+  lastUpdated: 1703123456789                 // timestamp (ms)
+}
+```
+
+#### Uniswap V4 Position
+
+Source: `UniswapV4Adapter.js` `getPositionData()`
+
+```javascript
+{
+  id: '12345',                               // NFT token ID (string)
+  pool: '0x8a34b3...',                       // bytes32 poolId (keccak256 hash of PoolKey — NOT an address)
+  tickLower: -887220,                        // lower tick boundary (number)
+  tickUpper: 887220,                         // upper tick boundary (number)
+  liquidity: '1000000000000000000',          // position liquidity (string)
+  feeGrowthInside0LastX128: '123456789...',  // fee growth snapshot (string)
+  feeGrowthInside1LastX128: '987654321...',  // fee growth snapshot (string)
+  tokensOwed0: '0',                          // always "0" — V4 doesn't track owed fees in the same struct
+  tokensOwed1: '0',                          // always "0"
+  lastUpdated: 1703123456789                 // timestamp (ms)
+}
+```
+
+V4 positions are structurally similar to V3 but with two key differences: `pool` is a bytes32 hash (not an address), and `tokensOwed0`/`tokensOwed1` are always `"0"` because V4 doesn't track uncollected fees in the position struct.
+
+#### Trader Joe V2.2 Position
+
+Source: `TraderJoeV2_2Adapter.js` `getPositionData()`
+
+```javascript
+{
+  id: '99',                                  // NFT token ID (string)
+  pool: '0xa3c4e6...',                       // lowercase LBPair address
+  proxy: '0xProxyAddress...',                // EIP-1167 proxy contract holding ERC1155 LB tokens
+  lowerBinId: 8388500,                       // lowest bin ID with liquidity (number)
+  upperBinId: 8388600,                       // highest bin ID with liquidity (number)
+  depositIds: [8388500, 8388501, ...],       // array of bin IDs where liquidity is deposited
+  liquidityMinted: ['1000000', '2000000', ...], // array of liquidity amounts per bin (parallel to depositIds)
+  active: true,                              // whether position is active (boolean)
+  createdAt: 1703123456,                     // position creation timestamp (number, seconds)
+  lastUpdated: 1703123456789                 // cache update timestamp (ms)
+}
+```
+
+TJ positions differ fundamentally from V3/V4:
+- **Bin-based, not tick-based**: Uses `lowerBinId`/`upperBinId` instead of `tickLower`/`tickUpper`
+- **Multi-bin liquidity**: `depositIds` and `liquidityMinted` are parallel arrays — each bin has its own liquidity amount
+- **No fee growth fields**: No `feeGrowthInside*` or `tokensOwed*` — TJ fee math is done off-chain via LiquidityHelperContract
+- **Proxy contract**: Each position has an EIP-1167 proxy that holds the ERC1155 LB tokens for per-position fee attribution
 
 ---
 

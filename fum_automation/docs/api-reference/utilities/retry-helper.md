@@ -13,7 +13,7 @@ Checks error codes and messages recursively (follows `error.cause` chain). Never
 
 **Retryable codes:** NETWORK_ERROR, TIMEOUT, ETIMEDOUT, ECONNREFUSED, ECONNRESET, ENOTFOUND, EHOSTUNREACH, EAI_AGAIN
 
-**Retryable message patterns:** network, timeout, connection, rate limit, 429, 502, 503, 504, The Graph, gateway timeout, bad gateway, fetch failed
+**Retryable message patterns:** network, timeout, connection, rate limit, too many requests, 429, 502, 503, 504, The Graph, gateway timeout, bad gateway, fetch failed
 
 ### retryWithBackoff(fn, options?) → Promise\<result\>
 

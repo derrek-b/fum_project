@@ -59,8 +59,9 @@ Transaction `type` determines which vault contract function is called:
 | `subliq` | `decreaseLiquidity(targets, data)` | No |
 | `collect` | `collect(targets, data)` | No |
 | `burn` | `burn(targets, data)` | No |
+| `incentive` | `incentive(targets, calldatas, values)` | No |
 
-Each transaction in the array must have `{ to, data, value? }`. Creates signer from `AUTOMATION_PRIVATE_KEY` env var.
+Each transaction in the array must have `{ to, data, value? }`. Derives signer from `AUTOMATION_MNEMONIC` via HD path `m/44'/60'/0'/0/{executorIndex}`.
 
 ## Events Emitted
 

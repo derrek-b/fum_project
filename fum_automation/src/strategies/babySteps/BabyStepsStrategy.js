@@ -11,10 +11,10 @@ import { retryRpcCall } from '../../utils/RetryHelper.js';
 import { UnrecoverableError, formatErrorForDisplay } from '../../utils/errors.js';
 
 /**
- * Baby Steps Strategy - Conservative position management with single position per vault
+ * Baby Steps Strategy - Conservative single-position management per vault
  *
- * Phase 1: Basic initialization only.
- * Strategy methods TBD during Phase 2 design.
+ * Supports all platforms (Uniswap V3, V4, Trader Joe V2.2) via platform adapters.
+ * Handles initialization, swap-event evaluation, rebalancing, fee collection, and position creation.
  */
 export default class BabyStepsStrategy extends StrategyBase {
   /**

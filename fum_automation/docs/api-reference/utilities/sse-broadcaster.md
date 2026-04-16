@@ -47,13 +47,13 @@ new SSEBroadcaster(eventManager, {
 
 ## Broadcast Events
 
-Events streamed to connected SSE clients (19 total):
+Events streamed to connected SSE clients (22 total):
 
 **Service:** ServiceStarted, ServiceStartFailed
 **Positions:** NewPositionCreated, PositionsClosed, PositionRebalanced, LiquidityAddedToPosition
 **Fees:** FeesCollected
 **Swaps:** TokensSwapped
-**Native:** ETHWrapped, ETHUnwrapped
+**Native:** NativeWrapped, NativeUnwrapped
 **Vaults:** VaultBaselineCaptured, MonitoringStarted, VaultFailed, VaultRecovered, VaultBlacklisted, VaultUnblacklisted
 **Distributions:** FeesDistributed, ExecutorFunded
 **Errors:** VaultAuthEventFailed

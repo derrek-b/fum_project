@@ -47,13 +47,15 @@ src/
     └── patchProviderFeeData.js # Chain-specific gas fee overrides
 
 test/
-├── helpers/                   # Test setup utilities per platform (hardhat-setup, swap-utils, vault-setup)
+├── helpers/                   # Test setup utilities per platform (hardhat-setup, swap-utils, vault-setup + V4/TJ variants, executor-utils, tracker-assertions, wait-utils)
 ├── unit/                      # Unit tests (EventManager, VaultDataService, RetryHelper, BlacklistManager)
 └── workflow/                  # Integration tests organized by scenario
     ├── service-init/          # Vault discovery → position creation flows
     ├── swap-event/            # Fee collection triggered by swap events
     ├── config-update/         # Strategy parameter changes
     ├── error-handling/        # Recovery and failure scenarios
+    ├── executor-funding/      # Executor gas top-up workflows
+    ├── vault-auth/            # Vault authorization grant + revoke
     ├── vault-setup/           # Vault initialization edge cases
     ├── service-stop/          # Graceful shutdown
     ├── v4/                    # Uniswap V4-specific workflows

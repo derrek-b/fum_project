@@ -79,12 +79,13 @@ Copy `.env.example` to `.env.local` and configure:
 |----------|-------------|
 | `CHAIN_ID` | Network ID (1337=Hardhat local, 42161=Arbitrum One) |
 | `WS_URL` | WebSocket RPC endpoint for real-time events |
-| `AUTOMATION_PRIVATE_KEY` | Private key for executor wallet (signs transactions) |
+| `AUTOMATION_MNEMONIC` | BIP-39 mnemonic for executor HD wallet (derives per-vault signing keys) |
 | `SSE_PORT` | Port for Server-Sent Events HTTP server |
 | `RETRY_INTERVAL_MS` | Interval between retry cycles for failed vaults |
 | `MAX_FAILURE_DURATION_MS` | Time before a failing vault is blacklisted |
 | `THEGRAPH_API_KEY` | The Graph API key for subgraph queries |
 | `ALCHEMY_API_KEY` | Alchemy API key for Arbitrum RPC (see note below) |
+| `BLOCK_EXPLORER_API_KEY` | Block explorer API key (Arbiscan/Snowtrace) for contract verification |
 
 > **Note on ALCHEMY_API_KEY**: Required for both production AND local testing. In production (chainId 42161), it's used for Arbitrum RPC URLs. In local testing (chainId 1337), the AlphaRouter still needs Arbitrum RPC for swap routing.
 
@@ -98,6 +99,8 @@ Copy `.env.example` to `.env.local` and configure:
 | `COINGECKO_API_KEY` | - | CoinGecko API key for token prices (see note below) |
 | `TELEGRAM_BOT_API_KEY` | - | Telegram bot API key for notifications |
 | `TELEGRAM_CHAT_ID` | - | Telegram chat ID for notifications |
+| `FORK_CHAIN` | `arbitrum` | Chain to fork for tests (`arbitrum` or `avalanche`) |
+| `DATA_DIR` | `./data` | Base directory for all data files (blacklist, vault tracking) |
 
 > **Note on COINGECKO_API_KEY**: While technically optional, this is **strongly recommended for production**. Without it, the free CoinGecko tier's rate limits will cause price fetching failures under normal operating conditions. For local testing, the lower request volume may stay within free tier limits.
 
@@ -113,7 +116,7 @@ DEBUG=true npm run start
 
 The service will:
 1. Connect to the blockchain via WebSocket
-2. Initialize platform adapters (UniswapV3)
+2. Initialize platform adapters (Uniswap V3, V4, Trader Joe V2.2)
 3. Load authorized vaults from the VaultFactory
 4. Start monitoring positions and events
 5. Expose SSE endpoint at `http://localhost:{SSE_PORT}/events`
@@ -132,8 +135,9 @@ A simplified strategy for liquidity management:
 
 ## Platform Support
 
-- **UniswapV3**: Complete implementation for Uniswap V3 pools on Arbitrum
-- Additional platforms can be added through the extensible adapter architecture
+- **Uniswap V3**: Concentrated liquidity on Arbitrum
+- **Uniswap V4**: Concentrated liquidity with hooks on Arbitrum
+- **Trader Joe V2.2**: Liquidity Book (bin-based) on Avalanche
 
 ## Testing
 
@@ -141,7 +145,6 @@ See [TESTING.md](TESTING.md) for comprehensive testing documentation including:
 
 - Unit tests for configuration and utilities
 - Workflow tests with real blockchain interactions
-- Custom test scenarios via JSON configuration
 - Test naming conventions
 
 ```bash
@@ -155,7 +158,12 @@ npm test test/unit
 npm test test/workflow
 
 # Run specific test
-npm test test/workflow/service-init/BS-0vaults.test.js
+npm test test/workflow/service-init/BS-0000.test.js
+
+# Platform-specific workflow tests
+npm run test:v3:run-all    # Uniswap V3 (FORK_CHAIN=arbitrum)
+npm run test:v4:run-all    # Uniswap V4 (FORK_CHAIN=arbitrum)
+npm run test:tj:run-all    # Trader Joe V2.2 (FORK_CHAIN=avalanche)
 
 # Watch mode
 npm run test:watch

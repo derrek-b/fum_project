@@ -51,14 +51,11 @@ Read from `vault.strategy.parameters`:
 |---|---|---|
 | `targetRangeUpper` | number (basis points) | Target range above current price |
 | `targetRangeLower` | number (basis points) | Target range below current price |
-| `rebalanceThresholdUpper` | number (basis points) | Upper rebalance trigger |
-| `rebalanceThresholdLower` | number (basis points) | Lower rebalance trigger |
 | `feeReinvestment` | boolean | Enable fee reinvestment |
-| `reinvestmentTrigger` | string (wei) | Min fee value to trigger collection |
+| `reinvestmentTrigger` | string (wei) | Min fee value (USD) to trigger collection |
 | `reinvestmentRatio` | number (basis points) | % of fees to reinvest |
 | `maxSlippage` | number (basis points) | Maximum slippage tolerance |
 | `emergencyExitTrigger` | number (basis points) | Emergency exit price deviation |
-| `maxUtilization` | number (basis points) | Max vault utilization for positions |
 
 ## See Also
 

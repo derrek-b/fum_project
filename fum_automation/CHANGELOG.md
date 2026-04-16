@@ -1,5 +1,44 @@
 # F.U.M. Project Changelog
 
+## [1.1.0] - 2026-04
+
+### Multi-Platform Support
+
+#### **Uniswap V4 Integration**
+- **ADDED**: UniswapV4Adapter support via fum_library — concentrated liquidity with hooks
+- **ADDED**: V4-specific workflow tests (`test/workflow/v4/`) covering initialization, execution, and gas profiling
+- **ADDED**: V4 test helpers (`v4-hardhat-setup.js`, `v4-swap-utils.js`, `v4-vault-setup.js`)
+- **ADDED**: V4 pool identification via bytes32 poolId (keccak256 hash of PoolKey)
+
+#### **Trader Joe V2.2 Integration**
+- **ADDED**: TraderJoeV2_2Adapter support via fum_library — Liquidity Book bin-based positions
+- **ADDED**: TJ workflow tests (`test/workflow/traderjoe/`) with `FORK_CHAIN=avalanche` support
+- **ADDED**: TJ test helpers (`traderjoe-swap-utils.js`, `traderjoe-vault-setup.js`)
+- **ADDED**: Per-position EIP-1167 proxy support (TJPositionProxy) for ERC1155 LB token management
+- **ADDED**: Bin-based position caching (`depositIds`, `liquidityMinted` arrays, `lowerBinId`/`upperBinId`)
+
+#### **Service Resilience**
+- **ADDED**: `ServiceHealth` module — WebSocket subscription canary (`provider.on('block')`) and ping/pong keepalive for transport-layer health monitoring. Routes unhealthy status to provider reconnection.
+- **ADDED**: `VaultHealth` module — executor gas balance monitoring, per-vault holdback calculations, automated top-ups from vault reserves, and `ExecutorFundingRequired`/`ExecutorFundingCleared` state management
+- **ADDED**: `UnrecoverableError` class — immediate vault blacklisting for failures that cannot recover with retries (e.g., empty vault during initialization)
+- **ADDED**: Deferred auth revocation — `pendingOffboards` Set defers vault offboarding when vault is locked; processes on `VaultUnlocked`
+- **ADDED**: Deferred config updates — `pendingConfigUpdates` Map queues strategy parameter changes during locked operations (latest-wins per type)
+
+#### **Error Handling Test Suite**
+- **ADDED**: Comprehensive error handling tests (`test/workflow/error-handling/`) covering blacklist management, emergency exits, provider reconnection, subscription recovery, executor funding failures, ownership verification, and retry queue cleanup
+
+#### **Testing Infrastructure**
+- **ADDED**: `FORK_CHAIN` env var support — `arbitrum` (default) or `avalanche` for platform-specific test forks
+- **ADDED**: Platform-specific npm scripts: `test:v3:run-all`, `test:v4:run-all`, `test:tj:run-all`, `test:tj`
+- **ADDED**: `executor-utils.js`, `tracker-assertions.js`, `wait-utils.js` test helpers
+- **ADDED**: Gas profiling tests for all three platforms
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: Requires fum_library v1.2.1+ with multi-platform adapter support
+**Dependency**: Node.js >=22.0.0
+
+---
+
 ## [1.0.4] - 2025-12-17
 
 ### Native ETH Support
