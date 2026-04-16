@@ -710,7 +710,7 @@
       }
     ],
     "addresses": {
-      "1337": "0x6C942D6B9f70F37368505d1D2c5687A1A2992A32",
+      "1337": "0xA887973a2EC1a3B4C7d50b84306eBCBC21bF2d5A",
       "1338": "0x1E53bea57Dd5dDa7bFf1a1180a2f64a5c9e222f5",
       "42161": "0xeAdA21fc37F548d4813b74C9f0a2eA66ff9fef27"
     }
@@ -2342,7 +2342,7 @@
       }
     ],
     "addresses": {
-      "1337": "0xa9672a817618Ae03A8A342d004e3b53f50798948",
+      "1337": "0xc3b3dBE3d12128FDFf1694dd55fb18f8775E6667",
       "1338": "0x633a7eB9b8912b22f3616013F3153de687F96074",
       "42161": "0x31709a06fB0B7DAe79B35f94cDc9D74FB348103B"
     }
@@ -3242,7 +3242,7 @@
       }
     ],
     "addresses": {
-      "1337": "0xe49F9bD99AD2125d99dA5940E75579f54d230038"
+      "1337": "0x4a6082b952A59d7EE61926ee935e34DC023e7C23"
     }
   },
   "UniswapV3PositionValidator": {
@@ -3339,7 +3339,7 @@
       }
     ],
     "addresses": {
-      "1337": "0x70f52D28abe4a0892e3daED979C735023Af7d3f5"
+      "1337": "0xa062C91fa437ea27587cB6888ecBB85cA82e816B"
     }
   },
   "UniswapV4PositionValidator": {
@@ -3436,7 +3436,7 @@
       }
     ],
     "addresses": {
-      "1337": "0x3D92C115496437b9Ae8eCd49324004a320AF8907"
+      "1337": "0x636Dd917ea284896D45c62Ee0462EF42c509110A"
     }
   },
   "TJPositionValidator": {
@@ -3584,7 +3584,7 @@
       }
     ],
     "addresses": {
-      "1337": "0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C"
+      "1337": "0x05Cd2b0d713920a698Dc720d58D559582F19E9c5"
     }
   }
 };
