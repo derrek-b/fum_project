@@ -37,7 +37,7 @@ constructor()  // "Wrapped Ether" / "WETH", 18 decimals
 | `withdraw(uint256 wad)` | Burns WETH, returns ETH |
 | `receive()` | Fallback — accepts ETH, mints WETH |
 
-Extends MockERC20 so inherits `mint`, `burn`, and all ERC20 functions.
+Extends OpenZeppelin's `ERC20` directly (not `MockERC20`). To fund a MockWETH balance in tests, call `deposit()` with msg.value or send ETH to `receive()`. There is no `mint()` or `burn()` test helper.
 
 ### MockPositionNFT
 
@@ -143,7 +143,7 @@ constructor()  // Default: 3 bins, 1 ETH + 1000 USDC added
 | `setShouldFail(bool)` | Makes `addLiquidity` revert |
 | `setShouldFailRemove(bool)` | Makes `removeLiquidity` revert |
 | `setReturnValues(amountXAdded, amountYAdded, amountXLeft, amountYLeft, depositIds[], liquidityMinted[])` | Full add return values |
-| `setRemoveReturnValues(amountX, amountY)` | First remove call returns |
+| `setRemoveReturnValues(amountX, amountY)` | First remove call returns. If neither this nor `setRemoveReturnValues2` has been called (both zero), the mock falls back to the caller's `amountXMin`/`amountYMin` (see `MockLBRouter.sol:226–227`) |
 | `setRemoveReturnValues2(amountX, amountY)` | Second remove call returns (for fee + principal) |
 | `resetRemoveCallCount()` | Reset sequential call counter |
 
@@ -170,9 +170,11 @@ constructor()
 
 ## Standard Deployment Sequences
 
+Code samples below elide `await x.waitForDeployment();` after each `.deploy()` for brevity. Real tests call it after every deploy — do the same when adapting these snippets.
+
 ### Full Vault Setup (PositionVault.test.js pattern)
 
-Used by `PositionVault.test.js`, `TJPositionManager.test.js`, `BabyStepsStrategy.test.js`:
+Used by `PositionVault.test.js`. `TJPositionManager.test.js` uses a TJ-specific subset (see Trader Joe Extension). `BabyStepsStrategy.test.js`, `StrategyBase.test.js`, and `ParrisIslandStrategy.test.js` use a minimal Strategy-Only Setup (see below). Validator tests use a minimal Validator-Only Setup (see below).
 
 ```javascript
 // 1. Get signers
@@ -216,7 +218,7 @@ const vaultCreatedEvent = receipt.logs.find(
 const vaultAddress = vaultCreatedEvent.args[1];  // args[0] = owner, args[1] = vault
 const vault = await ethers.getContractAt("PositionVault", vaultAddress);
 
-// 7. Fund vault with test tokens
+// 7. Fund vault with a test token
 const MockERC20 = await ethers.getContractFactory("MockERC20");
 const token = await MockERC20.deploy("Test Token", "TEST", 18);
 await token.mint(vaultAddress, ethers.parseEther("100"));
@@ -224,7 +226,7 @@ await token.mint(vaultAddress, ethers.parseEther("100"));
 
 ### Trader Joe Extension
 
-Extends the full vault setup with TJ-specific contracts:
+`TJPositionManager.test.js` deploys `MockPermit2` + `VaultFactory` plus two `MockERC20` tokens for the LB pair from Full Vault Setup (no `MockUniversalRouter` or `MockNonfungiblePositionManager`), then adds the TJ-specific contracts below:
 
 ```javascript
 // Token sorting (TJ requires tokenX < tokenY by address)
@@ -261,7 +263,11 @@ await factory.setLiquidityValidator(
   await tjValidator.getAddress()
 );
 
-// Vault must approve TJPositionManager for token transfers
+// Vault must approve TJPositionManager for token transfers.
+// Assume `pmAddress`, `tokenXAddress`, `tokenYAddress`, and `vault` are in scope
+// from the Full Vault Setup steps above — in the real test they come from
+// await {positionManager,tokenX,tokenY}.getAddress() and the
+// vaultCreatedEvent.args[1] extraction.
 const approveIface = new ethers.Interface([
   "function approve(address spender, uint256 amount) returns (bool)"
 ]);
@@ -271,7 +277,7 @@ await vault.approve([tokenXAddress, tokenYAddress], [approveData, approveData]);
 
 ### Validator-Only Setup (minimal)
 
-Used by all 5 validator test files — no mocks, no factory, no vault:
+Used by all 6 validator test files in `test/unit/validators/` — no mocks, no factory, no vault:
 
 ```javascript
 beforeEach(async function() {
@@ -281,17 +287,26 @@ beforeEach(async function() {
 
   const Validator = await ethers.getContractFactory("ValidatorName");
   validator = await Validator.deploy();
-  await validator.waitForDeployment();
 });
 ```
 
 Validator tests use the signer's address as a stand-in for the vault address. The validators only check that the recipient in calldata matches the vault address — they don't need a real vault.
 
-### Strategy Setup
+### Strategy-Only Minimal Setup
 
-Extends full vault setup with strategy authorization:
+Used by `StrategyBase.test.js`, `BabyStepsStrategy.test.js`, and `ParrisIslandStrategy.test.js`. These tests exercise only strategy logic routed through `vault.execute()`, so they skip `MockUniversalRouter`, `MockNonfungiblePositionManager`, and `MockPermit2`, and do not register validators:
 
 ```javascript
+// 1. Get signers
+const [owner, user1] = await ethers.getSigners();
+
+// 2. Deploy VaultFactory with canonical Permit2 address (no MockPermit2 needed)
+const VaultFactory = await ethers.getContractFactory("VaultFactory");
+const factory = await VaultFactory.deploy(
+  owner.address,
+  "0x000000000022D473030F116dDEE9F6B43aC78BA3"  // canonical Permit2
+);
+
 // Deploy strategy
 const BabyStepsStrategy = await ethers.getContractFactory("BabyStepsStrategy");
 const strategy = await BabyStepsStrategy.deploy();
@@ -303,6 +318,7 @@ const receipt = await tx.wait();
 const vault1Address = receipt.logs.find(
   log => log.fragment?.name === 'VaultCreated'
 ).args[1];
+const vault1 = await ethers.getContractAt("PositionVault", vault1Address);
 
 // Authorize vault (must be called by vault owner)
 await strategy.connect(user1).authorizeVault(vault1Address);
@@ -316,7 +332,7 @@ const strategyInterface = new ethers.Interface([
 ]);
 
 const data = strategyInterface.encodeFunctionData("selectTemplate", [1]); // CONSERVATIVE
-await vault.connect(user1).execute([strategyAddress], [data]);
+await vault1.connect(user1).execute([strategyAddress], [data]);
 ```
 
 ---
@@ -403,6 +419,16 @@ encodeLBRouterSwap(functionName, params)
 
 Handles all 6 LB Router swap functions. 5-param group (`swapExactTokensForTokens`, `swapExactTokensForNATIVE`, `swapTokensForExactTokens`, `swapTokensForExactNATIVE`) encodes as `(amount1, amount2, path, to, deadline)`. 4-param group (`swapNATIVEForExactTokens`, `swapExactNATIVEForTokens`) encodes as `(amount1, path, to, deadline)`.
 
+### Merkl Incentive (MerklIncentiveValidator.test.js)
+
+```
+encodeClaimCalldata(user, tokens, amounts, proofs)
+```
+
+Encodes a call to the Merkl Distributor `claim(address user, address[] tokens, uint256[] amounts, bytes32[][] proofs)`. `tokens`, `amounts`, and `proofs` must be parallel arrays.
+
+**Key constant:** `CLAIM_SELECTOR = "0xa0165082"` (selector for `claim(address,address[],uint256[],bytes32[][])`)
+
 ---
 
 ## Vault Address Extraction Pattern
@@ -440,7 +466,7 @@ const vaultAddress = factory.interface.parseLog(vaultCreatedEvent).args[1];
 
 3. **Deadline source matters** — Use `(await ethers.provider.getBlock("latest")).timestamp + 3600` for block-relative deadlines. Wall-clock `Date.now()` can drift from the forked block timestamp.
 
-4. **V4 has no mock contract** — UniswapV4PositionValidator tests use signer addresses as stand-ins for token and hook addresses. Only calldata encoding/parsing is tested.
+4. **Validators without a protocol mock test calldata only** — The V4 position manager and Merkl Distributor have no mock contracts. `UniswapV4PositionValidator.test.js` and `MerklIncentiveValidator.test.js` use signer addresses as stand-ins for tokens, hooks, and recipients, and only exercise calldata encoding/parsing.
 
 5. **Vault approval for TJ** — The vault must approve TJPositionManager for token transfers. This is done through `vault.approve()` with encoded ERC20 `approve` calldata, not a direct `token.approve()` call.
 

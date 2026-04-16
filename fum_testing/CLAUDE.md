@@ -15,6 +15,15 @@ npx hardhat node               # Start local Hardhat node
 npx hardhat test --grep "pattern"  # Run specific tests
 ```
 
+## From the fum Project
+
+```bash
+cd ../fum && npm run contracts:test           # Sync + run all Hardhat tests
+cd ../fum && npm run contracts:test:coverage  # Sync + run coverage
+```
+
+Prefer these when you've just edited a contract in `fum/contracts/` — they guarantee the synced copy here matches the source of truth before running.
+
 ## Do NOT Edit Contracts Here
 
 Contracts in this project are **copies** synced from `fum/contracts/`. The source of truth is always `fum/contracts/`. To update contracts here:
@@ -45,7 +54,7 @@ test/unit/
 
 ## Mock Contracts
 
-Tests use 8 mock contracts in `contracts/` (prefixed `Mock*`) to simulate external protocols: ERC20 tokens, WETH, Uniswap V3 position NFTs, Universal Router, Trader Joe LB pair/router, and Permit2. Most mocks expose `setShouldFail()` for error path testing and `last*` variables for call verification.
+Tests use 8 mock contracts in `contracts/` (prefixed `Mock*`) to simulate external protocols: an ERC20 token, WETH, Uniswap V3 position NFTs, Universal Router, Trader Joe LB pair/router, and Permit2. Most mocks expose `setShouldFail()` for error path testing and `last*` variables for call verification.
 
 ## Architecture
 
@@ -55,7 +64,9 @@ Detailed docs in `docs/architecture/`:
 ## Key Details
 
 - **Solidity**: ^0.8.28
-- **Hardhat config**: Forks Arbitrum mainnet via Alchemy (`NEXT_PUBLIC_ALCHEMY_API_KEY` in .env)
+- **Hardhat config**: Forks Arbitrum mainnet via Alchemy (`NEXT_PUBLIC_ALCHEMY_API_KEY` in .env), local chainId `1337`
+- **Setup**: Copy `.env.example` to `.env` and set `NEXT_PUBLIC_ALCHEMY_API_KEY` before running tests
+- **Interfaces**: `contracts/interfaces/` (6 files: `IIncentiveValidator`, `ILBPair`, `ILBRouter`, `ILiquidityValidator`, `ISwapValidator`, `IVaultFactory`) — also synced from `fum/contracts/`
 - **Dependencies**: OpenZeppelin v5, Uniswap V3 core/periphery, Hardhat Toolbox
 - **No dependency on fum_library** — this project is fully standalone
 - Tests use Hardhat's built-in Chai matchers (`expect(...).to.be.revertedWith(...)`, etc.)
