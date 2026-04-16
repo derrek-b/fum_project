@@ -154,6 +154,7 @@ class PingPongKeepalive {
     this.enabled = true;
 
     this.pongHandler = () => {
+      this.log('🏓 PingPongKeepalive: pong received');
       this.pongPending = false;
       if (this.pongTimer) {
         clearTimeout(this.pongTimer);
@@ -204,6 +205,7 @@ class PingPongKeepalive {
 
     try {
       this.ws.ping();
+      this.log('🏓 PingPongKeepalive: ping sent');
     } catch (error) {
       // send failed (socket closed/corrupted) — treat as unhealthy
       this.log(`PingPongKeepalive: ping send failed: ${error.message}`);
