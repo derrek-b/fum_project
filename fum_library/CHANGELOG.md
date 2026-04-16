@@ -5,6 +5,95 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Backfill covering work between 2025-12-17 and 2026-04-16. Package version remains `1.2.1`; a version bump will cut this section on next release.
+
+### Added
+
+#### Adapter interface
+- **Frontend display methods** on every adapter — `getPositionsForDisplay(ownerAddress, provider)` and `refreshPositionForDisplay(positionId, provider)`. Returns pre-computed display shapes (prices, formatted amounts, in-range booleans) so the frontend never interprets platform-specific pool state. `refreshPositionForDisplay` is used by the frontend's `useModalData` hook for 30-second auto-refresh. Applies to V3, V4, and TJ V2.2.
+- **`supportsNativePools`** adapter property (default `false`). `UniswapV4Adapter` overrides to `true` so the strategy can route native ETH directly for V4 ETH pools (`currency0 = AddressZero`).
+- **V4 local position discovery** — `_discoverTokenIdsByTransferEvents` scans `PositionManager` Transfer events on Hardhat forks where The Graph subgraph is unavailable. Enabled via the new `isLocalChain` helper.
+- **Merkl incentive integration** — `src/services/merkl.js` with `fetchPoolIncentives`, `fetchClaimData`, `clearIncentiveCache`. `UniswapV4Adapter` overrides `getPoolIncentives` and `getIncentiveClaimTransactions` to use Merkl (auto-tracking; no staking/unstaking needed).
+- **TJ position proxy pattern** — `TJPositionManager` clones a minimal EIP-1167 proxy (`TJPositionProxy`) per position so each position holds its own LBToken balance. Adapter updated to track `position.proxy` and route LBToken operations through per-position proxies.
+- **V3 `burnToken` support** — `generateRemoveLiquidityData` now accepts a `burnToken` flag to burn the position NFT after full removal.
+
+#### Chain helpers
+- **`getExpectedBlockMs(chainId)`** — returns expected ms between blocks for the `SubscriptionCanary` (`null` disables the canary on Hardhat forks).
+- **`getExecutorXpub(chainId)`** — BIP-32 extended public key for per-vault executor wallet derivation.
+- **`getMinExecutorBalance(chainId)`** / **`getMaxExecutorBalance(chainId)`** — native-token balance thresholds for the executor top-up loop.
+- **`getMaxPriorityFeePerGas(chainId)`** — chain-specific max priority fee as a wei string (Arbitrum returns `"0"`, Avalanche returns `"1000"`).
+- **`getMinDeploymentForGas(chainId)`** / **`getMinSwapValue(chainId)`** / **`getTransactionDeadlineMinutes(chainId)`** — chain-level gas economics.
+- **`isLocalChain(chainId)`** — true for Hardhat forks `1337` and `1338`.
+- **Chain 1338 (Forked Avalanche)** added to `configs/chains.js` with full TJ V2.2 address set and test coverage.
+
+#### The Graph service
+- **`configureTheGraph({ apiKey })`** — module-level API key configuration.
+- **`discoverV4Pools(token0Address, token1Address, chainId, options?)`** — V4 pool discovery via subgraph, filtered to vanilla pools (`hooks = AddressZero`) and sorted by liquidity.
+- **`getV4PositionsByOwner(ownerAddress, chainId, options?)`** — V4 position tokenId enumeration (V4's `PositionManager` does not implement `ERC721Enumerable`).
+
+#### Block explorer service
+- **`src/services/blockExplorer.js`** — factory-based service for fetching internal transactions from block explorers. Arbiscan/Etherscan V2 implementation supports chains `42161` and `1337`; Alchemy backend for chains `1` and `137` is reserved but not implemented. Used by `UniswapV4Adapter` for native ETH tracking during closure/collect receipt parsing.
+
+#### Test infrastructure
+- **Gas profiling tests** for V3, V4, and TJ. Data now recorded in `docs/platform-knowledge/chain-gas-fees.md`.
+- **Shared Hardhat node** across Vitest projects — split Arbitrum/Avalanche tests into separate Vitest projects with persistent fork nodes to reduce setup overhead.
+- **Adapter test gotchas** documented in `CLAUDE.md` (port `8545` requirement for V3/V4 AlphaRouter, V4 stale block state after many `evm_revert` cycles, `vi.mock` hoisting).
+- **New test coverage** for chainId validation, wrapped token fallback, `supportsNativePools`, and stale `minSwapValue` assertions.
+
+#### Documentation
+- **API reference docs** for `UniswapV4Adapter`, `TraderJoeV2_2Adapter`, `merkl`, `blockExplorer` (were missing).
+- **Source mapping comments** (`<!-- Source: ... -->`) added to API reference docs for stale-doc detection via `/commit`.
+
+### Changed
+
+#### Chain helpers — error model and naming
+- **Renames**: `getSupportedChainIds` → `lookupSupportedChainIds`, `getChainPlatformIds` → `lookupChainPlatformIds`, `getChainRpcUrl` → `getChainRpcUrls` (returns an array now).
+- **Throw on unknown chain** for `getChainConfig`, `getChainName`, `getPlatformAddresses`, `getChainRpcUrls` (previously returned `null`). `isChainSupported` and `isLocalChain` remain boolean returns.
+- **`getChainRpcUrls`** appends the Alchemy API key at runtime for Arbitrum (42161) and Avalanche (43114); throws if `configureChainHelpers({ alchemyApiKey })` was not called.
+
+#### AlphaRouter (V3, V4)
+- **Fork-aware initialization**: on chainId 1337, uses local fork provider with `StaticV3SubgraphProvider`, `StaticGasPriceProvider`, and a stubbed `arbitrumGasDataProvider` (avoids calling the `ArbGasInfo` precompile, which doesn't exist on the fork). Quotes now reflect the fork's pool state rather than live mainnet prices.
+- **Constrained routing** on local forks (`maxSplits: 1`, `topN: 1`) — cuts `EXACT_OUTPUT` quote times from 60–370s to <60s.
+
+#### Adapter surface
+- **Removed dead `provider` param** from `AdapterFactory.getAdapter`, `AdapterFactory.getAdaptersForChain`, and adapter constructors. Providers are now passed per-method call only.
+- **TJ adapter**: removed quote metadata from adapter returns, renamed `vault`→`owner` for clarity, removed `vault` param from encoding for existing-position operations.
+- **V4 pool token symbols** are resolved via `getTokenByAddress` from the config instead of the subgraph — no external dependency for symbol lookups.
+- **Strategy validation** now treats native and wrapped tokens as equivalent (ETH ≡ WETH, AVAX ≡ WAVAX).
+
+#### Gas thresholds (2026-03-04)
+- Arbitrum: `minDeploymentForGas` `$10 → $50`, `minSwapValue` `$0.10 → $10`. Avalanche unchanged.
+
+#### Build tooling
+- **`scripts/generate-docs.js`** regex updated to match `export async function` (was missing them — that's why `modules.md` previously showed incomplete service entries).
+- **`modules.md`** timestamp removed from output to avoid false diffs on every `npm run pack`.
+
+### Fixed
+
+- **V4 AlphaRouter stale block state** on Hardhat forks after many `evm_revert` cycles — tests now re-instantiate the adapter before late-running describe blocks to reset the AlphaRouter's internal provider.
+- **TJ fee display rounding** — small fees were rounding to incorrect values.
+- **`getTokenBySymbol`** — now resolves wrapped-native symbols (`WETH`, `WAVAX`) to their wrapped entries.
+- **V4 pool token symbols** — fall back to config lookup when the subgraph has no token metadata.
+- **`readProvider` race condition** in blockchain wallet module.
+- **Trader Joe and AUSD logo file extensions** — `.svg` → `.png` to match actual asset files.
+
+### Removed
+
+- **`./helpers/vaultHelpers` package.json export** — the target file never existed (broken export entry).
+
+### Documentation (notable)
+
+- Root + per-project `CLAUDE.md` files, `docs/decisions/`, `docs/platform-knowledge/` established as the second-brain system (Feb 2026).
+- `docs/architecture/` docs rewritten to match current source in Feb 2026.
+- Incentive documentation added to `services.md` and `adapters.md` when Merkl support landed.
+- Adapter self-sufficiency and `refreshPositionForDisplay` documented in `adapters.md`.
+- V4 slippage examples corrected in source JSDoc (`5%` → `0.5%`).
+- Documentation audit completed 2026-04-16 — 4 missing API docs created, 3 stale docs rewritten, package.json broken export removed, missing sub-path exports added for `merkl`, `blockExplorer`, and `theGraph`.
+
+---
+
 ## [1.2.1] - 2025-12-17
 
 ### WETH Token Helpers Consistency

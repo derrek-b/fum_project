@@ -1,439 +1,511 @@
-<!-- Source: src/helpers/chainHelpers.js -->
+<!-- Source: src/helpers/chainHelpers.js, src/configs/chains.js -->
 # Chain Helpers API
 
-Chain configuration utilities for managing blockchain network settings and platform integrations.
+Chain configuration lookups for the FUM Library. All helpers use fail-fast validation — invalid chainIds and unsupported chains throw descriptive errors immediately. Only `isChainSupported` and `isLocalChain` return booleans.
 
 ## Overview
 
-The Chain Helpers module provides comprehensive utilities for working with blockchain networks in the FUM Library. It manages chain configurations, RPC endpoints, platform addresses, and executor contracts across multiple blockchain networks.
+Chain configurations live in `src/configs/chains.js`. This module wraps those configurations with validation and platform-aware lookups. Currently-configured chains: `42161` (Arbitrum One), `43114` (Avalanche), `1337` (Hardhat Arbitrum fork), `1338` (Hardhat Avalanche fork).
 
-## Functions
+## Exports
+
+```javascript
+import {
+  configureChainHelpers,
+  validateChainId,
+  getChainConfig,
+  getChainName,
+  getChainRpcUrls,
+  getExecutorXpub,
+  getMinExecutorBalance,
+  getMaxExecutorBalance,
+  isChainSupported,
+  isLocalChain,
+  lookupSupportedChainIds,
+  getPlatformAddresses,
+  lookupChainPlatformIds,
+  getMinDeploymentForGas,
+  getMinSwapValue,
+  getTransactionDeadlineMinutes,
+  getMaxPriorityFeePerGas,
+  getExpectedBlockMs
+} from 'fum_library/helpers/chainHelpers';
+```
+
+## Configuration
+
+### configureChainHelpers
+
+Set module-level configuration consumed by `getChainRpcUrls`. The Alchemy API key is appended to RPC URLs for chains that use Alchemy endpoints (Arbitrum 42161, Avalanche 43114).
+
+```javascript
+configureChainHelpers({ alchemyApiKey: string }): void
+```
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `alchemyApiKey` | `string` | No | Alchemy API key; if omitted, the previous value is preserved |
+
+#### Example
+```javascript
+import { configureChainHelpers } from 'fum_library/helpers/chainHelpers';
+configureChainHelpers({ alchemyApiKey: process.env.ALCHEMY_API_KEY });
+```
 
 ---
 
-## getChainConfig
+## Validation
 
-Get complete chain configuration by chain ID.
+### validateChainId
 
-### Signature
+Throws if the argument is not a positive integer. Used internally by every lookup function; also exported for use by other helpers.
+
 ```javascript
-getChainConfig(chainId: number): Object | null
+validateChainId(chainId: any): void
 ```
 
-### Parameters
+| Throws | Condition |
+|---|---|
+| `chainId parameter is required` | `null` or `undefined` |
+| `chainId must be a number` | Non-number type |
+| `chainId must be a finite number` | `NaN` or `Infinity` |
+| `chainId must be an integer` | Non-integer |
+| `chainId must be greater than 0` | `<= 0` |
 
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| chainId | `number` | Yes | - | The blockchain network ID |
+---
 
-### Returns
+## Chain Lookup
 
-`Object | null` - Chain configuration object containing name, rpcUrl, executorAddress, and platformAddresses - null if not found
+### getChainConfig
 
-### Return Object Structure
+Get the complete chain configuration object.
+
+```javascript
+getChainConfig(chainId: number): ChainConfig
+```
+
+Returns the raw config object from `chains.js`:
+
 ```javascript
 {
-  name: string,              // Human-readable chain name
-  rpcUrl: string,           // RPC endpoint URL
-  executorAddress: string,  // Executor contract address
-  platformAddresses: {      // Platform-specific addresses
-    [platformId]: {
-      enabled: boolean,
-      factoryAddress: string,
-      positionManagerAddress: string
-    }
-  }
+  name: string,                      // e.g. "Arbitrum One"
+  nativeCurrency: { name, symbol, decimals },
+  rpcUrls: string[],
+  blockExplorerUrls: string[],
+  executorXpub: string,
+  minExecutorBalance: number,        // native token units
+  maxExecutorBalance: number,        // native token units
+  maxPriorityFeePerGas: string,      // wei per gas
+  minDeploymentForGas: number,       // USD
+  minSwapValue: number,              // USD
+  transactionDeadlineMinutes: number,
+  expectedBlockMs: number | null,
+  platformAddresses: {
+    [platformId]: { factoryAddress, positionManagerAddress, ... }
+  },
+  merklDistributorAddress?: string   // optional, present on V4-supporting chains
 }
 ```
 
-### Examples
+#### Throws
 
+- `chainId` fails `validateChainId`
+- `Chain X is not supported` if the chain is not in `chains.js`
+
+#### Example
 ```javascript
-// Get Ethereum mainnet configuration
-const config = getChainConfig(1);
-// Returns: { 
-//   name: "Ethereum", 
-//   rpcUrl: "https://...", 
-//   executorAddress: "0x...", 
-//   platformAddresses: {...} 
-// }
-
-// Handle unknown chain
-const config = getChainConfig(999999);
-// Returns: null
+const config = getChainConfig(42161);
+console.log(config.name);                  // "Arbitrum One"
+console.log(config.transactionDeadlineMinutes); // 5
 ```
-
-### Side Effects
-None - Pure function
 
 ---
 
-## getChainName
+### getChainName
 
-Get human-readable chain name by chain ID.
-
-### Signature
 ```javascript
 getChainName(chainId: number): string
 ```
 
-### Parameters
+Returns the human-readable chain name.
 
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| chainId | `number` | Yes | - | The blockchain network ID |
+#### Throws
+- `validateChainId` errors
+- `Chain X is not supported`
+- `Chain X name not configured` (if the config has no `name`)
 
-### Returns
-
-`string` - Human-readable chain name or "Unknown Chain" if not found
-
-### Examples
-
+#### Example
 ```javascript
-// Get known chain names
-getChainName(1);     // "Ethereum"
-getChainName(137);   // "Polygon"
-getChainName(42161); // "Arbitrum"
-
-// Handle unknown chain
-getChainName(999999); // "Unknown Chain"
+getChainName(42161);   // "Arbitrum One"
+getChainName(43114);   // "Avalanche"
+getChainName(1337);    // "Forked Arbitrum"
 ```
-
-### Side Effects
-None - Pure function
 
 ---
 
-## getChainRpcUrl
+### isChainSupported
 
-Get RPC URL for a specific chain.
-
-### Signature
-```javascript
-getChainRpcUrl(chainId: number): string | null
-```
-
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| chainId | `number` | Yes | - | The blockchain network ID |
-
-### Returns
-
-`string | null` - RPC endpoint URL for blockchain interactions - null if chain not found
-
-### Examples
-
-```javascript
-// Get RPC URL for Ethereum mainnet
-const rpcUrl = getChainRpcUrl(1);
-// Use with ethers.js
-const provider = new ethers.JsonRpcProvider(rpcUrl);
-
-// Handle missing RPC URL
-const rpcUrl = getChainRpcUrl(999999);
-if (!rpcUrl) {
-  console.error('Chain not supported');
-}
-```
-
-### Use Cases
-- Creating blockchain providers
-- Configuring Web3 connections
-- Multi-chain dApp initialization
-
-### Side Effects
-None - Pure function
-
----
-
-## getExecutorAddress
-
-Get the executor contract address for the specified chain.
-
-### Signature
-```javascript
-getExecutorAddress(chainId: number): string | null
-```
-
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| chainId | `number` | Yes | - | The blockchain network ID |
-
-### Returns
-
-`string | null` - The executor contract address (0x-prefixed) - null if not configured
-
-### Examples
-
-```javascript
-// Get executor for Ethereum mainnet
-const executor = getExecutorAddress(1);
-// Returns: "0x742d35Cc6634C0532925a3b844Bc9e7595f7E2e1"
-
-// Use in contract interaction
-const executorAddress = getExecutorAddress(chainId);
-if (executorAddress) {
-  const contract = new ethers.Contract(executorAddress, executorABI, provider);
-}
-```
-
-### Important Notes
-
-⚠️ **WARNING**: The executor address is critical for vault operations. Always verify the address exists before attempting to interact with it.
-
-### Side Effects
-None - Pure function
-
----
-
-## isChainSupported
-
-Check if a chain is supported by the FUM Library.
-
-### Signature
 ```javascript
 isChainSupported(chainId: number): boolean
 ```
 
-### Parameters
+Returns `true` if the chain is configured, `false` otherwise. Still validates that `chainId` itself is a positive integer (throws via `validateChainId`).
 
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| chainId | `number` | Yes | - | The blockchain network ID to check |
-
-### Returns
-
-`boolean` - True if the chain is supported, false otherwise
-
-### Examples
-
+#### Example
 ```javascript
-// Check before proceeding with chain-specific operations
 if (!isChainSupported(chainId)) {
   throw new Error(`Chain ${chainId} is not supported`);
 }
 
 // Filter supported chains
-const supportedNetworks = [1, 137, 42161, 10].filter(isChainSupported);
-
-// Validate user's network
-const userChainId = await provider.getNetwork().then(n => n.chainId);
-if (!isChainSupported(userChainId)) {
-  alert('Please switch to a supported network');
-}
+const supported = [1, 137, 42161, 10].filter(isChainSupported);
 ```
-
-### Side Effects
-None - Pure function
 
 ---
 
-## getSupportedChainIds
+### isLocalChain
 
-Get all supported chain IDs.
-
-### Signature
 ```javascript
-getSupportedChainIds(): Array<number>
+isLocalChain(chainId: number): boolean
 ```
 
-### Parameters
+Returns `true` if `chainId` is `1337` (Hardhat Arbitrum fork) or `1338` (Hardhat Avalanche fork); otherwise `false`. Throws via `validateChainId` on invalid input.
 
-None
+#### Example
+```javascript
+if (isLocalChain(chainId)) {
+  // Skip real-chain infrastructure like WebSocket canary or Merkl API calls
+}
+```
 
-### Returns
+---
 
-`Array<number>` - Array of supported chain IDs as integers
-
-### Examples
+### lookupSupportedChainIds
 
 ```javascript
-// Get all supported chains
-const chainIds = getSupportedChainIds();
-// Returns: [1, 137, 42161, 10, ...]
+lookupSupportedChainIds(): number[]
+```
 
-// Create chain selector dropdown
-const chains = getSupportedChainIds().map(id => ({
+Returns all configured chain IDs as integers (e.g. `[42161, 1337, 43114, 1338]`).
+
+#### Example
+```javascript
+const chains = lookupSupportedChainIds().map(id => ({
   id,
-  name: getChainName(id),
-  rpcUrl: getChainRpcUrl(id)
+  name: getChainName(id)
 }));
-
-// Check if any chains are supported
-if (getSupportedChainIds().length === 0) {
-  console.error('No chains configured');
-}
 ```
-
-### Side Effects
-None - Pure function
 
 ---
 
-## getPlatformAddresses
+## RPC
 
-Get platform-specific contract addresses for a chain.
+### getChainRpcUrls
 
-### Signature
+Returns the RPC URL list for a chain. For Arbitrum (`42161`) and Avalanche (`43114`), the Alchemy API key set via `configureChainHelpers` is appended to each base URL.
+
 ```javascript
-getPlatformAddresses(chainId: number, platformId: string): Object | null
+getChainRpcUrls(chainId: number): string[]
 ```
 
-### Parameters
+#### Throws
+- `validateChainId` errors
+- `Chain X is not supported`
+- `No RPC URL configured for chain X` (config missing `rpcUrls`)
+- `Chain X RPC URLs not configured` (empty or non-array)
+- `Alchemy API key not configured. Call configureChainHelpers({ alchemyApiKey }) or initFumLibrary({ alchemyApiKey }) first.` (Arbitrum/Avalanche when key is absent)
 
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| chainId | `number` | Yes | - | The blockchain network ID |
-| platformId | `string` | Yes | - | The platform identifier (e.g., 'uniswapV3', 'aaveV3') |
+#### Example
+```javascript
+import { ethers } from 'ethers';
 
-### Returns
+configureChainHelpers({ alchemyApiKey: process.env.ALCHEMY_API_KEY });
+const urls = getChainRpcUrls(42161);
+// ["https://arb-mainnet.g.alchemy.com/v2/<your-key>"]
+const provider = new ethers.providers.JsonRpcProvider(urls[0]);
 
-`Object | null` - Platform addresses object with factoryAddress and positionManagerAddress - null if not found or disabled
+// Hardhat forks have no API key requirement
+getChainRpcUrls(1337); // ["http://localhost:8545"]
+```
 
-### Return Object Structure
+---
+
+## Executor
+
+### getExecutorXpub
+
+Returns the BIP-32 extended public key for the automation executor wallet on the given chain. Used by wallet derivation utilities to generate per-vault executor addresses.
+
+```javascript
+getExecutorXpub(chainId: number): string
+```
+
+#### Throws
+- `validateChainId` errors
+- `Chain X is not supported`
+- `No executor xpub configured for chain X` (empty string)
+
+---
+
+### getMinExecutorBalance
+
+Minimum executor wallet balance in native token units (ETH, AVAX). Executor balance monitoring uses this to trigger top-up.
+
+```javascript
+getMinExecutorBalance(chainId: number): number
+```
+
+#### Throws
+- `validateChainId` errors
+- `Chain X is not supported`
+- `No minimum executor balance configured for chain X` (non-positive or missing)
+
+#### Example
+```javascript
+getMinExecutorBalance(42161);  // 0.002 (ETH)
+getMinExecutorBalance(43114);  // 0.04  (AVAX)
+```
+
+---
+
+### getMaxExecutorBalance
+
+Top-up target: the balance to which the executor wallet is refilled when its balance drops below `minExecutorBalance`. Native token units.
+
+```javascript
+getMaxExecutorBalance(chainId: number): number
+```
+
+#### Throws
+- `validateChainId` errors
+- `Chain X is not supported`
+- `No maximum executor balance configured for chain X` (non-positive or missing)
+
+#### Example
+```javascript
+getMaxExecutorBalance(42161);  // 0.004 (ETH)
+getMaxExecutorBalance(43114);  // 0.08  (AVAX)
+```
+
+---
+
+## Platform Lookup
+
+### getPlatformAddresses
+
+Contract addresses for a specific platform on a specific chain.
+
+```javascript
+getPlatformAddresses(chainId: number, platformId: string): PlatformAddresses
+```
+
+Returns the platform-specific address object from `chains.js`, e.g. for `uniswapV3` on Arbitrum:
+
 ```javascript
 {
-  enabled: boolean,                 // Whether platform is active
-  factoryAddress: string,          // Factory contract address
-  positionManagerAddress: string   // Position manager address
+  factoryAddress: "0x1F98...",
+  positionManagerAddress: "0xC364...",
+  routerAddress: "0xE592...",
+  universalRouterAddress: "0xa51a...",
+  quoterAddress: "0x61fF..."
 }
 ```
 
-### Examples
+Shape varies by platform (V4: `poolManagerAddress`, `stateViewAddress`, etc.; TJ: `lbFactoryAddress`, `lbRouterAddress`, etc.).
 
-```javascript
-// Get Uniswap V3 addresses on Ethereum
-const addresses = getPlatformAddresses(1, 'uniswapV3');
-// Returns: { 
-//   enabled: true,
-//   factoryAddress: "0x1F984...",
-//   positionManagerAddress: "0xC3650..."
-// }
-
-// Check if platform is available before using
-const platformConfig = getPlatformAddresses(chainId, platformId);
-if (!platformConfig) {
-  console.error(`Platform ${platformId} not available on chain ${chainId}`);
-}
-
-// Initialize platform contracts
-const config = getPlatformAddresses(chainId, 'uniswapV3');
-if (config && config.enabled) {
-  const factory = new ethers.Contract(config.factoryAddress, factoryABI, provider);
-  const positionManager = new ethers.Contract(config.positionManagerAddress, pmABI, provider);
-}
-```
-
-### Side Effects
-None - Pure function
+#### Throws
+- `validateChainId` errors
+- `platformId parameter is required` / `platformId must be a string` / `platformId cannot be empty`
+- `Chain X is not supported`
+- `No platform addresses configured for chain X`
+- `Platform Y not configured for chain X`
 
 ---
 
-## getChainPlatformIds
+### lookupChainPlatformIds
 
-Get all platform IDs available on a specific chain.
-
-### Signature
-```javascript
-getChainPlatformIds(chainId: number): Array<string>
-```
-
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| chainId | `number` | Yes | - | The blockchain network ID |
-
-### Returns
-
-`Array<string>` - Array of enabled platform IDs for the chain
-
-### Examples
+Returns all platform IDs available on a chain.
 
 ```javascript
-// Get all platforms on Ethereum mainnet
-const platforms = getChainPlatformIds(1);
-// Returns: ['uniswapV3', 'aaveV3', ...]
-
-// Build platform selector for a specific chain
-const availablePlatforms = getChainPlatformIds(chainId)
-  .map(platformId => ({
-    id: platformId,
-    name: getPlatformName(platformId),
-    addresses: getPlatformAddresses(chainId, platformId)
-  }));
-
-// Check if any platforms are available
-const chainPlatforms = getChainPlatformIds(chainId);
-if (chainPlatforms.length === 0) {
-  console.warn(`No platforms enabled for chain ${chainId}`);
-}
+lookupChainPlatformIds(chainId: number): string[]
 ```
 
-### Side Effects
-None - Pure function
+#### Throws
+- `validateChainId` errors
+- `Chain X is not supported`
+- `No platform addresses configured for chain X`
+
+#### Example
+```javascript
+lookupChainPlatformIds(42161);  // ['uniswapV3', 'uniswapV4']
+lookupChainPlatformIds(43114);  // ['traderjoeV2_2']
+```
 
 ---
 
-## Type Definitions
+## Gas & Thresholds
 
-```typescript
-// For TypeScript users
-interface ChainConfig {
-  name: string;
-  rpcUrl: string;
-  executorAddress: string;
-  platformAddresses: Record<string, PlatformConfig>;
-}
+### getMinDeploymentForGas
 
-interface PlatformConfig {
-  enabled: boolean;
-  factoryAddress: string;
-  positionManagerAddress: string;
-}
+Minimum deployment value (USD) for gas-efficient position creation. Strategies skip deployments below this threshold.
 
-type ChainId = number;
-type PlatformId = string;
+```javascript
+getMinDeploymentForGas(chainId: number): number
 ```
+
+#### Throws
+- `validateChainId` errors
+- `Chain X is not supported`
+- `No minimum deployment amount configured for chain X` (non-positive or missing)
+
+#### Example
+```javascript
+getMinDeploymentForGas(42161);  // 50 (USD)
+getMinDeploymentForGas(43114);  // 10 (USD)
+```
+
+---
+
+### getMinSwapValue
+
+Minimum swap value (USD). Swaps below this threshold are skipped — the value wouldn't cover gas economically.
+
+```javascript
+getMinSwapValue(chainId: number): number
+```
+
+#### Throws
+- `validateChainId` errors
+- `Chain X is not supported`
+- `No minimum swap value configured for chain X` (negative or missing)
+
+#### Example
+```javascript
+getMinSwapValue(42161);  // 10  (USD)
+getMinSwapValue(43114);  // 0.10 (USD)
+```
+
+---
+
+### getTransactionDeadlineMinutes
+
+Deadline in minutes passed to liquidity/swap operations that accept a deadline (Uniswap V3/V4, TJ V2.2).
+
+```javascript
+getTransactionDeadlineMinutes(chainId: number): number
+```
+
+#### Throws
+- `validateChainId` errors
+- `Chain X is not supported`
+- `No transaction deadline configured for chain X` (non-positive or missing)
+
+#### Example
+```javascript
+const deadlineMinutes = getTransactionDeadlineMinutes(42161); // 5
+
+const txData = await adapter.generateRemoveLiquidityData({
+  ...params,
+  deadlineMinutes
+});
+```
+
+---
+
+### getMaxPriorityFeePerGas
+
+Max priority fee in wei per gas, returned as a string (pass to `ethers.BigNumber.from`).
+
+```javascript
+getMaxPriorityFeePerGas(chainId: number): string
+```
+
+#### Throws
+- `validateChainId` errors
+- `Chain X is not supported`
+- `No maxPriorityFeePerGas configured for chain X` (undefined or null in config)
+
+#### Example
+```javascript
+// Arbitrum sequencer is FCFS — ignores tips entirely
+getMaxPriorityFeePerGas(42161); // "0"
+
+// Avalanche uses near-zero tip
+getMaxPriorityFeePerGas(43114); // "1000"   (1000 wei/gas)
+
+// Apply to a transaction
+const maxPriorityFeePerGas = ethers.BigNumber.from(getMaxPriorityFeePerGas(chainId));
+```
+
+---
+
+### getExpectedBlockMs
+
+Expected milliseconds between blocks for the WebSocket subscription canary. Returns `null` when the canary should be disabled (Hardhat forks mine only on transaction arrival).
+
+The `SubscriptionCanary` uses this to compute its deadline threshold (`2 × expectedBlockMs + 500ms` buffer). `null` skips the canary entirely.
+
+```javascript
+getExpectedBlockMs(chainId: number): number | null
+```
+
+#### Throws
+- `validateChainId` errors
+- `Chain X is not supported`
+- `No expectedBlockMs configured for chain X` (property missing from config)
+- `expectedBlockMs for chain X must be null or a positive finite number, got: <value>`
+
+#### Example
+```javascript
+getExpectedBlockMs(42161);  // 250   (Arbitrum — ~4 blocks/second)
+getExpectedBlockMs(43114);  // 2000  (Avalanche — ~2s blocks)
+getExpectedBlockMs(1337);   // null  (Hardhat Arbitrum fork — canary disabled)
+getExpectedBlockMs(1338);   // null  (Hardhat Avalanche fork — canary disabled)
+```
+
+---
 
 ## Common Patterns
 
-### Multi-Chain Initialization
+### Multi-Chain Provider Initialization
 ```javascript
-// Initialize providers for all supported chains
+import { ethers } from 'ethers';
+import {
+  configureChainHelpers,
+  lookupSupportedChainIds,
+  getChainRpcUrls
+} from 'fum_library/helpers/chainHelpers';
+
+configureChainHelpers({ alchemyApiKey: process.env.ALCHEMY_API_KEY });
+
 const providers = {};
-getSupportedChainIds().forEach(chainId => {
-  const rpcUrl = getChainRpcUrl(chainId);
-  if (rpcUrl) {
-    providers[chainId] = new ethers.JsonRpcProvider(rpcUrl);
-  }
-});
+for (const chainId of lookupSupportedChainIds()) {
+  const urls = getChainRpcUrls(chainId);
+  providers[chainId] = new ethers.providers.JsonRpcProvider(urls[0]);
+}
 ```
 
 ### Platform Availability Check
 ```javascript
-// Check which platforms are available across chains
-function getPlatformAvailability(platformId) {
-  return getSupportedChainIds()
-    .filter(chainId => {
-      const config = getPlatformAddresses(chainId, platformId);
-      return config && config.enabled;
-    })
-    .map(chainId => ({
-      chainId,
-      chainName: getChainName(chainId),
-      addresses: getPlatformAddresses(chainId, platformId)
-    }));
+import {
+  lookupSupportedChainIds,
+  lookupChainPlatformIds,
+  getPlatformAddresses
+} from 'fum_library/helpers/chainHelpers';
+
+function findChainsWithPlatform(platformId) {
+  return lookupSupportedChainIds().filter(chainId => {
+    return lookupChainPlatformIds(chainId).includes(platformId);
+  });
 }
+
+findChainsWithPlatform('uniswapV4');      // [42161, 1337]
+findChainsWithPlatform('traderjoeV2_2');  // [43114, 1338]
 ```
 
 ## See Also
 
-- [`platformHelpers`](./platform-helpers.md) - Platform-specific utilities
-- [`tokenHelpers`](./token-helpers.md) - Token configuration utilities
-- [Ethereum Chain List](https://chainlist.org/) - Comprehensive chain ID reference
-- [ethers.js Documentation](https://docs.ethers.io/) - Blockchain interaction library
+- [`platformHelpers`](./platform-helpers.md) — Platform metadata utilities
+- [`tokenHelpers`](./token-helpers.md) — Token lookups
+- [Helpers Architecture](../../architecture/helpers.md) — Per-module helper overview
+- [Ethereum Chain List](https://chainlist.org/) — Comprehensive chain ID reference

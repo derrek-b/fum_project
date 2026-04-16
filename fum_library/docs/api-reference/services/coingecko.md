@@ -11,6 +11,7 @@ The CoinGecko service integrates with the CoinGecko API to provide token price d
 
 ```javascript
 import {
+  configureCoingecko,
   fetchTokenPrices,
   clearPriceCache,
   buildApiUrl,
@@ -22,11 +23,27 @@ import {
 
 ## Configuration
 
-The service uses environment variables for configuration:
+### configureCoingecko
 
-| Environment Variable | Required | Description |
-|---------------------|----------|-------------|
-| `COINGECKO_API_KEY` | No | API key for CoinGecko (uses free tier if not provided) |
+Set the module-level CoinGecko API key. Consumed by `buildApiUrl` (appended as the `x_cg_demo_api_key` query parameter) and therefore by every request `fetchTokenPrices` makes. If omitted, requests use the unauthenticated free tier.
+
+```javascript
+configureCoingecko({ apiKey?: string }): void
+```
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `apiKey` | `string` | No | CoinGecko API key. If `undefined`, the previous value is preserved. Call with no argument (or `{ apiKey: null }`) to clear. |
+
+#### Example
+```javascript
+import { configureCoingecko } from 'fum_library/services/coingecko';
+
+// Typically called once at app startup (or via initFumLibrary)
+configureCoingecko({ apiKey: process.env.COINGECKO_API_KEY });
+```
+
+> `initFumLibrary({ coingeckoApiKey })` calls this internally — prefer that entry point in app startup code.
 
 ## Constants
 

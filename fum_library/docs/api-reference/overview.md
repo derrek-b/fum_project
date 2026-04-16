@@ -9,9 +9,11 @@ Detailed API documentation for fum_library modules.
 
 ## Adapters
 
-- [PlatformAdapter](./adapters/platform-adapter.md) — Abstract base class (27 required + 4 optional methods)
+- [PlatformAdapter](./adapters/platform-adapter.md) — Abstract base class (27 automation + 2 display + 4 optional methods)
 - [AdapterFactory](./adapters/adapter-factory.md) — Factory for creating adapters by platform ID
 - [UniswapV3Adapter](./adapters/uniswap-v3-adapter.md) — Uniswap V3 implementation details
+- [UniswapV4Adapter](./adapters/uniswap-v4-adapter.md) — Uniswap V4 implementation details (singleton PoolManager, PoolKey, hooks)
+- [TraderJoeV2_2Adapter](./adapters/traderJoe-v2-2-adapter.md) — Trader Joe V2.2 Liquidity Book (bin-based AMM)
 
 ## Blockchain
 
@@ -20,7 +22,7 @@ Detailed API documentation for fum_library modules.
 
 ## Helpers
 
-- [chainHelpers](./helpers/chain-helpers.md) — getChainConfig, getChainRpcUrls, getPlatformAddresses, lookupChainPlatformIds, getExecutorAddress
+- [chainHelpers](./helpers/chain-helpers.md) — getChainConfig, getChainRpcUrls, getPlatformAddresses, lookupChainPlatformIds, getExecutorXpub, getMinExecutorBalance, getMaxExecutorBalance, getMaxPriorityFeePerGas, getExpectedBlockMs, isLocalChain, and 8 others
 - [tokenHelpers](./helpers/token-helpers.md) — getTokenBySymbol, getTokenByAddress, getTokenAddress, getAllTokens, getCoingeckoId, isStablecoin, isNativeToken
 - [platformHelpers](./helpers/platform-helpers.md) — getPlatformMetadata, getPlatformFeeTiers, getAvailablePlatforms, lookupPlatformById
 - [strategyHelpers](./helpers/strategy-helpers.md) — lookupStrategyById, validateStrategyParams, getDefaultStrategyParams
@@ -30,7 +32,9 @@ Detailed API documentation for fum_library modules.
 ## Services
 
 - [coingecko](./services/coingecko.md) — fetchTokenPrices, CACHE_DURATIONS, buildApiUrl, clearPriceCache
-- [theGraph](./services/theGraph.md) — getPoolTVLAverage, getPoolAge, discoverV4Pools, getV4PositionsByOwner
+- [theGraph](./services/theGraph.md) — configureTheGraph, getPoolTVLAverage, getPoolAge, discoverV4Pools, getV4PositionsByOwner
+- [merkl](./services/merkl.md) — fetchPoolIncentives, fetchClaimData, clearIncentiveCache (V4 incentive source)
+- [blockExplorer](./services/blockExplorer.md) — getBlockExplorerService (internal-tx + native ETH tracking via Arbiscan / Etherscan V2)
 
 ## Configs
 

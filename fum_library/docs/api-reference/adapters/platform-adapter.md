@@ -512,3 +512,5 @@ These have safe default no-op implementations. Override to enable incentive supp
 - [Adapters Architecture](../../architecture/adapters.md) — Design decisions, data shapes, automation flows
 - [AdapterFactory](./adapter-factory.md) — Factory for creating adapters
 - [UniswapV3Adapter](./uniswap-v3-adapter.md) — V3 implementation details
+- [UniswapV4Adapter](./uniswap-v4-adapter.md) — V4 implementation details
+- [TraderJoeV2_2Adapter](./traderJoe-v2-2-adapter.md) — Trader Joe V2.2 implementation details

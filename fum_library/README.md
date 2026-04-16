@@ -1,11 +1,11 @@
 # F.U.M. Library
 
-![Version](https://img.shields.io/badge/version-0.24.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.2.1-blue.svg)
 ![License](https://img.shields.io/badge/license-Proprietary-red.svg)
 ![Node](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen.svg)
 ![Status](https://img.shields.io/badge/status-beta-yellow.svg)
 
-A comprehensive JavaScript library for DeFi liquidity management, focusing on Uniswap V3 positions and automated strategy execution.
+A comprehensive JavaScript library for DeFi liquidity management across multiple concentrated-liquidity protocols (Uniswap V3, Uniswap V4, Trader Joe V2.2) and automated strategy execution.
 
 ## 📚 Documentation
 
@@ -16,7 +16,7 @@ A comprehensive JavaScript library for DeFi liquidity management, focusing on Un
 
 ## Overview
 
-F.U.M. Library provides a modular toolkit for managing decentralized finance liquidity positions. It offers a standardized interface for interacting with various DeFi platforms, starting with Uniswap V3, and implements strategy execution for optimal liquidity management.
+F.U.M. Library provides a modular toolkit for managing decentralized finance liquidity positions. It offers a standardized interface for interacting with multiple DeFi platforms and implements strategy execution for optimal liquidity management.
 
 ## Core Concepts
 
@@ -25,7 +25,9 @@ The library uses ethers.js providers for blockchain interaction. You can create 
 
 ### Adapters
 Protocol adapters provide a unified interface for interacting with different DeFi protocols. Currently supported:
-- Uniswap V3
+- **Uniswap V3** (`UniswapV3Adapter`) — Arbitrum
+- **Uniswap V4** (`UniswapV4Adapter`) — Arbitrum
+- **Trader Joe V2.2 Liquidity Book** (`TraderJoeV2_2Adapter`) — Arbitrum, Avalanche
 
 ### Vaults
 Vaults are smart contracts that hold user positions. The library can fetch and aggregate data from multiple vaults.
@@ -39,7 +41,7 @@ Positions represent liquidity provided to DeFi protocols. Each position includes
 
 ## Features
 
-- **Platform Adapters**: Standardized interfaces for DeFi platforms (currently Uniswap V3)
+- **Platform Adapters**: Standardized interfaces for DeFi platforms (Uniswap V3, Uniswap V4, Trader Joe V2.2)
 - **Strategy Management**: Tools for implementing and executing liquidity provisioning strategies
 - **Vault Management**: Utilities for full lifecycle vault operations
 - **Token Helpers**: Functions for token listing, pricing, and conversions

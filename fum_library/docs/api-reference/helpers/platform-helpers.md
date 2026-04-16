@@ -312,13 +312,13 @@ None - Pure function
 
 ---
 
-## getPlatformById
+## lookupPlatformById
 
 Get complete platform configuration for a specific chain.
 
 ### Signature
 ```javascript
-getPlatformById(platformId: string, chainId: number): Object | null
+lookupPlatformById(platformId: string, chainId: number): Object | null
 ```
 
 ### Parameters
@@ -330,7 +330,7 @@ getPlatformById(platformId: string, chainId: number): Object | null
 
 ### Returns
 
-`Object | null` - Combined platform configuration with metadata and addresses - null if not found or not enabled
+`Object | null` - Combined platform configuration with metadata and addresses; `null` only when the platform is not configured on the chain. Throws for other invalid inputs.
 
 ### Return Object Structure
 ```javascript
@@ -339,19 +339,21 @@ getPlatformById(platformId: string, chainId: number): Object | null
   name: string,                    // Human-readable name
   factoryAddress: string,          // Factory contract address
   positionManagerAddress: string,  // Position manager address
+  routerAddress: string,           // Router contract address
+  quoterAddress: string,           // Quoter contract address
   logo: string,                    // Logo URL
   color: string,                   // Brand color (hex)
   description: string,             // Platform description
   features: Object,                // Feature flags
-  feeTiers: number[]              // Available fee tiers
+  feeTiers: number[]               // Available fee tiers (basis points)
 }
 ```
 
 ### Examples
 
 ```javascript
-// Get complete Uniswap V3 config for Ethereum
-const uniswap = getPlatformById('uniswapV3', 1);
+// Get complete Uniswap V3 config for Arbitrum
+const uniswap = lookupPlatformById('uniswapV3', 42161);
 // Returns: {
 //   id: "uniswapV3",
 //   name: "Uniswap V3",
@@ -364,8 +366,8 @@ const uniswap = getPlatformById('uniswapV3', 1);
 //   feeTiers: [500, 3000, 10000]
 // }
 
-// Check platform availability before using
-const platform = getPlatformById(platformId, chainId);
+// Check platform availability before using (null = platform not on this chain)
+const platform = lookupPlatformById(platformId, chainId);
 if (!platform) {
   throw new Error(`Platform ${platformId} not available on chain ${chainId}`);
 }
@@ -422,13 +424,13 @@ None - Pure function
 
 ---
 
-## getSupportedPlatformIds
+## lookupSupportedPlatformIds
 
 Get all configured platform IDs.
 
 ### Signature
 ```javascript
-getSupportedPlatformIds(): Array<string>
+lookupSupportedPlatformIds(): Array<string>
 ```
 
 ### Parameters
@@ -443,11 +445,11 @@ None
 
 ```javascript
 // Get all platform IDs
-const platformIds = getSupportedPlatformIds();
-// Returns: ['uniswapV3', 'aaveV3', 'compoundV3', ...]
+const platformIds = lookupSupportedPlatformIds();
+// Returns: ['uniswapV3', 'uniswapV4', 'traderjoeV2_2', ...]
 
 // Check if a platform is supported
-const supportedPlatforms = getSupportedPlatformIds();
+const supportedPlatforms = lookupSupportedPlatformIds();
 if (!supportedPlatforms.includes(userPlatform)) {
   throw new Error('Unsupported platform');
 }
@@ -497,17 +499,17 @@ type PlatformId = string;
 
 ### Multi-Chain Platform Discovery
 ```javascript
+import { lookupSupportedChainIds, getChainName } from 'fum_library/helpers/chainHelpers';
+import { lookupPlatformById } from 'fum_library/helpers/platformHelpers';
+
 // Find which chains support a specific platform
 function getPlatformChains(platformId) {
-  return getSupportedChainIds()
-    .filter(chainId => {
-      const platform = getPlatformById(platformId, chainId);
-      return platform !== null;
-    })
+  return lookupSupportedChainIds()
+    .filter(chainId => lookupPlatformById(platformId, chainId) !== null)
     .map(chainId => ({
       chainId,
       chainName: getChainName(chainId),
-      platform: getPlatformById(platformId, chainId)
+      platform: lookupPlatformById(platformId, chainId)
     }));
 }
 ```
@@ -516,7 +518,7 @@ function getPlatformChains(platformId) {
 ```javascript
 // Check platform capabilities
 function getPlatformCapabilities(platformId, chainId) {
-  const platform = getPlatformById(platformId, chainId);
+  const platform = lookupPlatformById(platformId, chainId);
   if (!platform) return null;
   
   return {

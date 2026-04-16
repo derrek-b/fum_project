@@ -44,7 +44,7 @@ AdapterFactory.hasAdapter('uniswapV3'); // true
 
 ## PlatformAdapter Interface
 
-`PlatformAdapter` is the abstract base class. All adapters extend it and implement 27 required methods + optionally override 4 incentive methods.
+`PlatformAdapter` is the abstract base class. All adapters extend it and implement 27 core automation methods + 2 frontend display methods = 29 required methods, and may optionally override 4 incentive methods (default to no-op).
 
 ### Constructor
 
@@ -343,7 +343,7 @@ export default class NewPlatformAdapter extends PlatformAdapter {
     // Cache ABIs and contract interfaces
   }
 
-  // Implement all 27 required methods...
+  // Implement all 29 required methods (27 automation + 2 display)...
   // Override optional incentive methods if needed...
 }
 ```

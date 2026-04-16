@@ -177,9 +177,17 @@ Contract ABIs and addresses for the F.U.M. project
 - from `ethers`
 
 **Exports:**
+- `getContract` (function)
+- `getVaultFactory` (function)
 - `getVaultFactoryAddress` (function)
+- `createVault` (function)
 - `getVaultContract` (function)
+- `getUserVaults` (function)
+- `getActiveVaults` (function)
+- `getVaultInfo` (function)
+- `getVaultExecutorIndex` (function)
 - `getContractInfoByAddress` (function)
+- `executeVaultTransactions` (function)
 
 ---
 
@@ -204,6 +212,14 @@ Blockchain Module - Ethereum Interaction Utilities
 **Imports:**
 - from `../helpers/chainHelpers.js`
 - from `ethers`
+
+**Exports:**
+- `createWeb3Provider` (function)
+- `createJsonRpcProvider` (function)
+- `getConnectedAccounts` (function)
+- `requestWalletConnection` (function)
+- `getChainId` (function)
+- `switchChain` (function)
 
 ---
 
@@ -338,6 +354,8 @@ Permit2 Helper Functions
 
 **Exports:**
 - `PERMIT2_ADDRESS` (variable)
+- `getPermit2Nonce` (function)
+- `generatePermit2Signature` (function)
 - `encodePermit2Input` (function)
 - `wrapWithPermit2` (function)
 
@@ -508,6 +526,7 @@ FUM Library - Main Entry Point
 - `CACHE_DURATIONS` (variable)
 - `priceCache` (variable)
 - `buildApiUrl` (function)
+- `fetchTokenPrices` (function)
 - `clearPriceCache` (function)
 
 ---
@@ -531,6 +550,8 @@ FUM Library - Main Entry Point
 **Path:** `src/services/merkl.js`
 
 **Exports:**
+- `fetchPoolIncentives` (function)
+- `fetchClaimData` (function)
 - `clearIncentiveCache` (function)
 
 ---
@@ -547,6 +568,10 @@ FUM Library - Main Entry Point
 
 **Exports:**
 - `configureTheGraph` (function)
+- `getPoolTVLAverage` (function)
+- `getPoolAge` (function)
+- `discoverV4Pools` (function)
+- `getV4PositionsByOwner` (function)
 
 ---
 

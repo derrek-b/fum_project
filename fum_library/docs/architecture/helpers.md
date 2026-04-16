@@ -31,22 +31,31 @@ Chain configuration lookups against `configs/chains.js`. Has a `configureChainHe
 | Function | Signature | Description |
 |---|---|---|
 | `configureChainHelpers` | `({ alchemyApiKey })` | Set Alchemy API key for RPC URLs |
-| `getChainConfig` | `(chainId) → Object` | Full chain config (name, rpcUrls, executorAddress, platformAddresses) |
+| `validateChainId` | `(chainId)` | Validates chainId is a positive integer (also exported for use by other helpers) |
+| `getChainConfig` | `(chainId) → Object` | Full chain config (name, rpcUrls, executorXpub, balances, gas, platformAddresses) |
 | `getChainName` | `(chainId) → string` | Human-readable chain name |
 | `getChainRpcUrls` | `(chainId) → string[]` | RPC URLs (appends Alchemy key for Arbitrum/Avalanche) |
-| `getExecutorAddress` | `(chainId) → string` | Automation executor address for the chain |
+| `getExecutorXpub` | `(chainId) → string` | Executor BIP-32 extended public key for the chain |
+| `getMinExecutorBalance` | `(chainId) → number` | Minimum executor wallet balance in native token units |
+| `getMaxExecutorBalance` | `(chainId) → number` | Maximum (top-up target) executor wallet balance in native token units |
 | `isChainSupported` | `(chainId) → boolean` | Check if chain is configured |
+| `isLocalChain` | `(chainId) → boolean` | Check if chain is a Hardhat fork (1337 or 1338) |
 | `lookupSupportedChainIds` | `() → number[]` | All configured chain IDs |
 | `getPlatformAddresses` | `(chainId, platformId) → Object` | Contract addresses for a platform on a chain |
 | `lookupChainPlatformIds` | `(chainId) → string[]` | Platform IDs available on a chain |
 | `getMinDeploymentForGas` | `(chainId) → number` | Minimum USD value for gas-efficient deployment |
 | `getMinSwapValue` | `(chainId) → number` | Minimum USD value below which swaps are skipped |
 | `getTransactionDeadlineMinutes` | `(chainId) → number` | TX deadline for liquidity/swap operations |
-| `validateChainId` | `(chainId)` | Validates chainId is a positive integer (also exported for use by other helpers) |
+| `getMaxPriorityFeePerGas` | `(chainId) → string` | Max priority fee in wei/gas as a string (pass to `ethers.BigNumber.from`) |
+| `getExpectedBlockMs` | `(chainId) → number\|null` | Expected ms between blocks for WebSocket subscription canary (`null` disables the canary for Hardhat forks) |
+
+### Error Handling
+
+All lookup functions throw descriptive errors when the chainId is invalid, the chain is not supported, or the requested property is missing from the chain config. `isChainSupported` and `isLocalChain` are the only functions that return a boolean instead of throwing on unknown chains (they still throw if `chainId` itself fails `validateChainId`).
 
 ### RPC URL Construction
 
-`getChainRpcUrls` requires the Alchemy API key for Arbitrum (42161) and Avalanche (43114) — these chains use Alchemy endpoints with the key appended at runtime. Other chains return URLs as-is.
+`getChainRpcUrls` requires the Alchemy API key for Arbitrum (42161) and Avalanche (43114) — these chains use Alchemy endpoints with the key appended at runtime. Other chains (including Hardhat forks) return URLs as-is.
 
 ---
 

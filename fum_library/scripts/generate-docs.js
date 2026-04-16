@@ -46,17 +46,17 @@ function parseFile(filePath) {
   }
   
   // Match export statements
-  const namedExportRegex = /export\s+(?:const|let|var|function|class)\s+(\w+)/g;
+  const namedExportRegex = /export\s+(?:async\s+function|const|let|var|function|class)\s+(\w+)/g;
   const defaultExportRegex = /export\s+default\s+(?:class\s+)?(\w+)/g;
   const reExportRegex = /export\s+\*\s+from\s+['"]([^'"]+)['"]/g;
   const namedReExportRegex = /export\s+{([^}]+)}\s+from\s+['"]([^'"]+)['"]/g;
   const namedAsExportRegex = /export\s+{\s*([^}]+)\s*}\s+from\s+['"]([^'"]+)['"]/g;
-  
+
   while ((match = namedExportRegex.exec(content)) !== null) {
     exports.push({
       type: 'named',
       name: match[1],
-      kind: match[0].includes('function') ? 'function' : 
+      kind: match[0].includes('function') ? 'function' :
             match[0].includes('class') ? 'class' : 'variable'
     });
   }
