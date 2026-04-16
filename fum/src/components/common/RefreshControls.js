@@ -8,7 +8,7 @@ import { setVaultsLastFetched } from '../../redux/vaultsSlice';
 import { useToast } from '../../context/ToastContext';
 import { clearPriceCache } from 'fum_library/services';
 
-export default function RefreshControls() {
+export default function RefreshControls({ onRefresh } = {}) {
   const dispatch = useDispatch();
   const { showError } = useToast();
   const { autoRefresh, isUpdating } = useSelector(state => state.updates);
@@ -28,6 +28,8 @@ export default function RefreshControls() {
       clearPriceCache();
       dispatch(setPositionsLastFetched(null));
       dispatch(setVaultsLastFetched(null));
+      // Call page-specific refresh if provided
+      if (onRefresh) onRefresh();
     } catch (error) {
       console.error("Error triggering manual refresh:", error);
       showError("Failed to refresh data. Please try again.");

@@ -1,5 +1,5 @@
 // src/pages/vault/[address].js
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/router";
 import { useSelector, useDispatch } from "react-redux";
 import { createSelector } from "@reduxjs/toolkit";
@@ -85,6 +85,7 @@ export default function VaultDetailPage() {
   const vaultMetrics = vaultFromRedux?.metrics;
   const vaultTokens = vaultFromRedux?.tokenBalances;
   const automationConnected = useSelector((state) => state.automation?.connected);
+  const { autoRefresh } = useSelector((state) => state.updates);
 
   // Get strategy info from Redux store
   const { strategyConfigs, activeStrategies, strategyPerformance, executionHistory } = useSelector((state) => state.strategies);
@@ -134,17 +135,19 @@ export default function VaultDetailPage() {
 
   // Load this specific vault's data (gated by freshness)
   // getVaultData dispatches to Redux — vaultFromRedux updates reactively
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async ({ force = false } = {}) => {
     if (!vaultAddress || !isReadReady || !chainId) {
       return;
     }
 
-    // Check freshness — skip if vault data was loaded recently
-    const vaultLastUpdated = vaultFromRedux?.lastUpdated;
-    const isFresh = vaultLastUpdated && (Date.now() - vaultLastUpdated < 30000);
-    if (isFresh) {
-      setIsLoading(false);
-      return;
+    // Check freshness — skip if vault data was loaded recently (bypass with force)
+    if (!force) {
+      const vaultLastUpdated = vaultFromRedux?.lastUpdated;
+      const isFresh = vaultLastUpdated && (Date.now() - vaultLastUpdated < 30000);
+      if (isFresh) {
+        setIsLoading(false);
+        return;
+      }
     }
 
     if (!vaultFromRedux) {
@@ -177,6 +180,22 @@ export default function VaultDetailPage() {
       loadData();
     }
   }, [vaultAddress, userAddress, isReadReady, chainId]);
+
+  // Keep a ref to the latest loadData so the auto-refresh interval doesn't
+  // tear down and recreate when loadData's deps change (e.g., lastUpdated)
+  const loadDataRef = useRef(loadData);
+  loadDataRef.current = loadData;
+
+  // Auto-refresh: set up interval when enabled
+  useEffect(() => {
+    if (!autoRefresh.enabled) return;
+
+    const intervalId = setInterval(() => {
+      loadDataRef.current({ force: true });
+    }, autoRefresh.interval);
+
+    return () => clearInterval(intervalId);
+  }, [autoRefresh.enabled, autoRefresh.interval]);
 
   // Fetch executor balance when automation is enabled
   useEffect(() => {
@@ -513,7 +532,7 @@ export default function VaultDetailPage() {
               &larr; Back to Vaults
             </Button>
           </Link>
-          <RefreshControls />
+          <RefreshControls onRefresh={() => loadData({ force: true })} />
         </div>
 
         <ErrorBoundary

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/router";
 import { useSelector, useDispatch } from "react-redux";
 import { Container, Row, Col, Card, Button, Badge, ProgressBar, Spinner, Alert, Tabs, Tab, OverlayTrigger, Tooltip } from "react-bootstrap";
@@ -67,7 +67,7 @@ export default function PositionDetailPage() {
   const vaults = useSelector((state) => state.vaults.userVaults);
   const { isConnected, address, chainId, isReconnecting } = useSelector((state) => state.wallet);
   const { provider } = useReadProvider();
-  const { resourcesUpdating } = useSelector((state) => state.updates);
+  const { resourcesUpdating, autoRefresh } = useSelector((state) => state.updates);
 
   // State for various UI elements
   const [invertPriceDisplay, setInvertPriceDisplay] = useState(false);
@@ -251,6 +251,22 @@ export default function PositionDetailPage() {
     });
   };
 
+  // Keep a ref to the latest refreshData so the auto-refresh interval doesn't
+  // tear down and recreate on every render (refreshData is not a useCallback)
+  const refreshDataRef = useRef(refreshData);
+  refreshDataRef.current = refreshData;
+
+  // Auto-refresh: set up interval when enabled
+  useEffect(() => {
+    if (!autoRefresh.enabled) return;
+
+    const intervalId = setInterval(() => {
+      refreshDataRef.current();
+    }, autoRefresh.interval);
+
+    return () => clearInterval(intervalId);
+  }, [autoRefresh.enabled, autoRefresh.interval]);
+
   // Calculate USD values
   const getUsdValue = (amount, tokenSymbol) => {
     if (!amount || amount === "0" || tokenPrices.loading || tokenPrices.error) return null;
@@ -384,7 +400,7 @@ export default function PositionDetailPage() {
                 <small className="text-muted">Refreshing...</small>
               </div>
             )}
-            <RefreshControls />
+            <RefreshControls onRefresh={refreshData} />
           </div>
         </div>
 
