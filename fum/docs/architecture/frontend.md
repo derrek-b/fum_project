@@ -288,8 +288,8 @@ The vault detail page also hydrates from Redux when VaultsContainer has already 
 
 **Three refresh mechanisms:**
 1. **SSE events** — Targeted fetches via `sseEventHandlers.js` (see SSE Integration below)
-2. **Auto-refresh** — AutoRefreshHandler invalidates freshness timestamps every 30s (if enabled)
-3. **Manual** — RefreshControls invalidates freshness timestamps
+2. **Auto-refresh** — On list pages, AutoRefreshHandler invalidates freshness timestamps every 30s (if enabled). Detail pages (`position/[id]`, `vault/[address]`) run their own `setInterval` that calls their refresh function directly, since they don't watch the global timestamps.
+3. **Manual** — RefreshControls accepts an optional `onRefresh` callback. On detail pages, this calls the page's own refresh function (`refreshData` for positions, `loadData({ force: true })` for vaults). The global timestamp invalidation is also dispatched so list pages re-fetch on next navigation.
 
 ### Vault Data Loading Pipeline
 
