@@ -61,7 +61,7 @@ How all smart contracts relate, their execution flows, and the factory-validator
 
 **Role Model:**
 - **Owner** — Full control. Can call `execute()` (raw arbitrary calls, no validation), set strategy/executor, withdraw tokens/positions, configure targets
-- **Executor** — Automation bot. Can call validated operations (swap, mint, liquidity, collect, burn), withdraw tokens/ETH, wrap/unwrap. Cannot call `execute()` or change strategy/executor
+- **Executor** — Automation bot. Can call validated operations (swap, mint, liquidity, collect, burn) and withdraw functions — but withdraw/unwrap functions hardcode the recipient to the vault owner, so the executor cannot redirect funds to itself. Cannot call `execute()` or change strategy/executor
 - **onlyOwner**: `execute`, `setStrategy`, `removeStrategy`, `setExecutor`, `removeExecutor`, `setTargetTokens`, `setTargetPlatforms`
 - **onlyAuthorized** (owner OR executor): all other operational functions
 
@@ -98,18 +98,35 @@ mapping(address => IIncentiveValidator) public incentiveValidators;   // target 
 mapping(address => address[]) public userVaults;   // user → their vault addresses
 mapping(address => VaultInfo) public vaultInfo;     // vault → metadata
 address[] public allVaults;                         // global registry
+uint256 public nextExecutorIndex;                   // monotonic counter assigned at vault creation
 
 struct VaultInfo {
     address owner;
     string name;
     uint256 creationTime;
     uint256 creationBlock;
+    uint256 executorIndex;   // per-vault index for deterministic executor wallet derivation
 }
 ```
 
-**Functions:** `createVault(name)`, `updateVaultName(vault, name)`, `getVaults(user)`, `getVaultInfo(vault)`, `getVaultCount(user)`, `getTotalVaultCount()`, `isVault(vault) → (bool, address owner)`
+**Functions:** `createVault(name)`, `updateVaultName(vault, name)`, `getVaults(user)`, `getVaultInfo(vault)`, `getVaultCount(user)`, `getTotalVaultCount()`, `isVault(vault) → (bool, address owner)`, `getVersion() → "2.0.0"`
 
 **Events:** `VaultCreated(user, vault, name, userVaultCount)`, `VaultNameUpdated(vault, name)`, `SwapValidatorUpdated(router, validator)`, `LiquidityValidatorUpdated(positionManager, validator)`, `IncentiveValidatorUpdated(target, validator)`
+
+### Active Vault Registry
+
+Tracks the subset of vaults that have an executor set — the working set the automation service iterates.
+
+```solidity
+address[] public activeVaults;
+mapping(address => uint256) private activeVaultIndex;   // 1-indexed (0 = not active)
+```
+
+**Vault-callable functions** (only the vault itself may call these; enforced via `msg.sender == vault`):
+- `registerActiveVault(vault)` — Called by `PositionVault.setExecutor` on first activation (executor transitions from `address(0)` → non-zero)
+- `deregisterActiveVault(vault)` — Called by `PositionVault.removeExecutor`. Uses swap-and-pop for O(1) removal.
+
+**Public views:** `getActiveVaults() → address[]`, `getActiveVaultCount() → uint256`
 
 ---
 
@@ -155,6 +172,8 @@ Same pattern for `mint`, `increaseLiquidity`, `decreaseLiquidity`, `collect`, `b
 | `wrapETH(weth, amount)` | onlyAuthorized | None (stays in vault) | — |
 | `unwrapETH(weth, amount)` | onlyAuthorized | None (stays in vault) | — |
 | `withdrawPosition(nftContract, tokenId)` | onlyAuthorized | None (sends to owner) | — |
+| `setExecutor(_executor)` | onlyOwner | None (registers vault with factory on first activation) | **payable** — optional `msg.value` forwarded to executor for initial gas funding |
+| `removeExecutor()` | onlyOwner | None (deregisters vault from factory) | — |
 | `fundExecutor(amount)` | onlyAuthorized | None (sends to executor) | **payable** — accepts `msg.value` |
 
 **Approve validation:** Only allows selectors `0x095ea7b3` (ERC20 `approve`) and `0x87517c45` (Permit2 `permit`). All other selectors revert.
@@ -169,7 +188,7 @@ Same pattern for `mint`, `increaseLiquidity`, `decreaseLiquidity`, `collect`, `b
 - Swap/mint/increaseLiquidity accept `values[]` parameter — vault sends its own ETH with each call
 - Wrap/unwrap functions for ETH ↔ WETH conversion within the vault
 
-**Events:** `TransactionExecuted(target, data, success, txType)`, `TokensWithdrawn(token, to, amount)`, `PositionWithdrawn(tokenId, nftContract, to)`, `StrategyChanged(strategy)`, `ExecutorChanged(executor, isAuthorized)`, `TargetTokensUpdated(tokens)`, `TargetPlatformsUpdated(platforms)`
+**Events:** `TransactionExecuted(target, data, success, txType)`, `TokensWithdrawn(token, to, amount)`, `PositionWithdrawn(tokenId, nftContract, to)`, `StrategyChanged(strategy)`, `ExecutorChanged(executor, isAuthorized)`, `ExecutorFunded(executor, amount)`, `TargetTokensUpdated(tokens)`, `TargetPlatformsUpdated(platforms)`
 
 ---
 
@@ -228,10 +247,12 @@ User calls strategy.authorizeVault(vaultAddress)
 | `targetRangeUpper` | uint16 (bps) | 0 | `setRangeParameters` |
 | `targetRangeLower` | uint16 (bps) | 1 | `setRangeParameters` |
 | `feeReinvestment` | bool | 2 | `setFeeParameters` |
-| `reinvestmentTrigger` | uint256 (wei) | 3 | `setFeeParameters` |
+| `reinvestmentTrigger` | uint256 (cents, USD) | 3 | `setFeeParameters` |
 | `reinvestmentRatio` | uint16 (bps) | 4 | `setFeeParameters` |
 | `maxSlippage` | uint16 (bps) | 5 | `setRiskParameters` |
 | `emergencyExitTrigger` | uint16 (bps) | 6 | `setRiskParameters` |
+
+> **Note:** Template constants for `reinvestmentTrigger` are stored as cents (e.g., `CONS_REINVESTMENT_TRIGGER = 5000` = $50.00). The field comment in `BabyStepsStrategy.sol` mislabels this as "USD value in wei (18 decimals)" — the template constants and all downstream comparisons treat the value as cents.
 
 ### ParrisIslandStrategy
 
@@ -262,13 +283,13 @@ Wraps Trader Joe V2.2 Liquidity Book (ERC1155-based) positions into a managed sy
 - `_lbRouter` — LB Router address (immutable)
 - `_proxyImplementation` — TJPositionProxy implementation address (immutable, cloned per position)
 
-**TJPositionProxy** is a minimal contract: `initialize(address _manager)` + `execute(address to, bytes data)` (onlyManager). The manager clones it per position and routes all LB token operations through it.
+**TJPositionProxy** is a minimal contract: `initialize(address _manager)` + `execute(address to, bytes data) returns (bytes memory)` (onlyManager). The manager clones it per position and routes all LB token operations through it.
 
 ### Position Struct
 
 ```solidity
 struct Position {
-    address vault;              // Owning vault
+    address owner;              // Position owner (always a PositionVault — enforced by createPosition auth)
     address lbPair;             // LB Pair contract
     address tokenX;             // First token
     address tokenY;             // Second token
@@ -291,14 +312,15 @@ vault.mint(targets=[tjPositionManager], data, values)
   ├── factory.validateMint(tjPositionManager, data, vault)
   │     └── TJPositionValidator checks selector + vault param (createPosition only)
   │
-  └── tjPositionManager.createPosition(vault, lbPair, ...)
+  └── tjPositionManager.createPosition(owner=vault, lbPair, ...)
+        ├── require(owner == msg.sender)  // enforces vault == owner
         ├── deploy proxy via Clones.clone(proxyImplementation)
         ├── proxy.initialize(address(this))
-        ├── transferFrom vault → manager → proxy (tokenX, tokenY)
-        ├── via proxy: approve LBRouter, addLiquidity(to=proxy, refundTo=vault)
+        ├── transferFrom owner → manager → proxy (tokenX, tokenY)
+        ├── via proxy: approve LBRouter, addLiquidity(to=proxy, refundTo=owner)
         ├── store Position with proxy, depositIds, liquidityMinted, previousX/Y
-        ├── via proxy: reset approvals, sweep leftover tokens to vault
-        └── emit PositionCreated
+        ├── via proxy: reset approvals, sweep leftover tokens to owner
+        └── emit PositionCreated(positionId, owner, lbPair, proxy, ...)
 ```
 
 **Key difference from V3/V4:** Each position's LB tokens are held by a dedicated proxy (not the manager), enabling per-position `balanceOf` queries for fee math. Tokens flow: vault → manager → proxy → LBRouter.
@@ -310,7 +332,11 @@ All fee computation happens off-chain via LFJ's LiquidityHelperContract (view ca
 - **Fee collection/removal**: Accept `feeShares[]` computed off-chain, burn fee LB tokens via proxy. Zero-amount entries are filtered by `_filterNonZero()` before calling `removeLiquidity` (LBPair reverts on zero amounts).
 - **Add to position**: Accept `previousFeesX/Y[]` and adjust baselines. Fees stay compounding until explicitly collected.
 
-**Functions:** `createPosition(...)`, `addToPosition(...)`, `collectFees(vault, positionId, feeShares[], amountXMin, amountYMin, deadline)`, `decreaseLiquidity(vault, positionId, percentage, feeShares[], amountXMin, amountYMin, deadline)`, `removePosition(vault, positionId, feeShares[], amountXMin, amountYMin, deadline)`, `getPosition(id)`, `getPositionsByVault(vault)`
+**Functions:** `createPosition(owner, lbPair, ...)`, `addToPosition(positionId, previousFeesX[], previousFeesY[], ...)`, `collectFees(positionId, feeShares[], amountXMin, amountYMin, deadline)`, `decreaseLiquidity(positionId, percentage, feeShares[], amountXMin, amountYMin, deadline)`, `removePosition(positionId, feeShares[], amountXMin, amountYMin, deadline)`, `safeTransferFrom(from, to, tokenId)`, `getPosition(id)`, `getPositionsByOwner(owner)`, `getPositionCount(owner)`
+
+**Events:** `PositionCreated(positionId, owner, lbPair, proxy, depositIds, liquidityMinted, amountXAdded, amountYAdded)`, `PositionRemoved(positionId, owner, lbPair, percentage, amountX, amountY)`, `PositionIncreased(positionId, owner, lbPair, amountXAdded, amountYAdded)`, `FeesCollected(positionId, owner, lbPair, amountX, amountY)`, `PositionTransferred(positionId, from, to)`
+
+Auth: `createPosition` requires `owner == msg.sender`; all other operations check `pos.owner == msg.sender` against stored position state. Because the vault is always `msg.sender`, `pos.owner` is always a PositionVault.
 
 ---
 
@@ -321,7 +347,7 @@ All fee computation happens off-chain via LFJ's LiquidityHelperContract (view ca
 | ISwapValidator | UniversalRouterValidator, TJSwapValidator | `validateSwap(data, vault)` |
 | ILiquidityValidator | UniswapV3PositionValidator, UniswapV4PositionValidator, TJPositionValidator | `validateMint`, `validateIncreaseLiquidity`, `validateDecreaseLiquidity`, `validateCollect`, `validateBurn` |
 | IIncentiveValidator | MerklIncentiveValidator | `validateIncentive(data, vault)` |
-| IVaultFactory | VaultFactory | `validateSwap`, `validateMint`, `validateIncreaseLiquidity`, `validateDecreaseLiquidity`, `validateCollect`, `validateBurn`, `validateIncentive` |
+| IVaultFactory | VaultFactory | `validateSwap`, `validateMint`, `validateIncreaseLiquidity`, `validateDecreaseLiquidity`, `validateCollect`, `validateBurn`, `validateIncentive`, `registerActiveVault`, `deregisterActiveVault` |
 | ILBPair | (external Trader Joe) | `getTokenX/Y`, `getBinStep`, `balanceOf`, `getBin`, `totalSupply`, `approveForAll` |
 | ILBRouter | (external Trader Joe) | `addLiquidity(LiquidityParameters)`, `removeLiquidity(...)` |
 
@@ -334,28 +360,28 @@ Setting up on a new chain:
 1. Deploy `VaultFactory(deployer, permit2Address)`
 2. Deploy `BabyStepsStrategy()`
 3. Deploy all 6 validators
-4. Deploy `TJPositionProxy()` (implementation contract)
-4b. Deploy `TJPositionManager(lbRouterAddress, tjPositionProxyAddress)` (if Trader Joe supported)
-5. Register swap validators:
+4. Deploy `TJPositionProxy()` (implementation contract, if Trader Joe supported)
+5. Deploy `TJPositionManager(lbRouterAddress, tjPositionProxyAddress)` (if Trader Joe supported)
+6. Register swap validators:
    - `factory.setSwapValidator(universalRouterAddress, universalRouterValidator)`
    - `factory.setSwapValidator(lbRouterAddress, tjSwapValidator)`
-6. Register liquidity validators:
+7. Register liquidity validators:
    - `factory.setLiquidityValidator(v3PositionManager, v3PositionValidator)`
    - `factory.setLiquidityValidator(v4PositionManager, v4PositionValidator)`
    - `factory.setLiquidityValidator(tjPositionManager, tjPositionValidator)`
-7. Register incentive validators:
+8. Register incentive validators:
    - `factory.setIncentiveValidator(merklDistributorAddress, merklIncentiveValidator)`
-8. Update fum_library with deployed addresses
-8. Run `npm run pack` in fum_library to distribute
+9. Update fum_library with deployed addresses
+10. Run `npm run pack` in fum_library to distribute
 
 ---
 
 ## Adding a New Platform
 
-1. **Determine interfaces needed** — Does the platform have a swap router? A position manager? Both?
-2. **Create validators** — Implement `ISwapValidator` for swaps, `ILiquidityValidator` for positions
+1. **Determine interfaces needed** — Does the platform have a swap router (ISwapValidator)? A position manager (ILiquidityValidator)? An incentive/reward distributor (IIncentiveValidator)? Any combination of the three.
+2. **Create validators** — Implement the relevant validator interface(s); for each function, parse calldata and enforce that recipients equal the vault address
 3. **Optional position manager wrapper** — If the platform uses ERC1155 or non-standard position tracking (like TJPositionManager wraps LB)
-4. **Deploy and register** — Deploy validators, call `setSwapValidator` / `setLiquidityValidator` on VaultFactory
+4. **Deploy and register** — Deploy validators, call `setSwapValidator` / `setLiquidityValidator` / `setIncentiveValidator` on VaultFactory as appropriate
 5. **Test** — Ensure all calldata parsing handles the platform's encoding correctly
 
 ---

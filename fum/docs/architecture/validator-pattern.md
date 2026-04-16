@@ -68,7 +68,7 @@ interface IIncentiveValidator {
 | TJSwapValidator | ISwapValidator | Trader Joe LBRouter | Low — selector + offset |
 | UniswapV3PositionValidator | ILiquidityValidator | V3 NonfungiblePositionManager | Medium — multicall unwrapping, assembly |
 | UniswapV4PositionValidator | ILiquidityValidator | V4 PositionManager | High — nested ABI decoding, 7 assembly ops |
-| TJPositionValidator | ILiquidityValidator | TJPositionManager | Low — selector-only (createPosition also checks vault param) |
+| TJPositionValidator | ILiquidityValidator | TJPositionManager | Low — selector-only (createPosition also checks owner param) |
 | MerklIncentiveValidator | IIncentiveValidator | Merkl Distributor | Low — selector + user check |
 
 ---
@@ -102,13 +102,15 @@ Any command not in this table causes a revert.
 
 When command `0x10` (V4_SWAP) is encountered, the validator decodes `(bytes actions, bytes[] params)` from the input and validates each action:
 
-| Action | Name | Recipient | Offset in params |
+| Action | Name | Recipient | Params decoded as |
 |---|---|---|---|
-| `0x0e` | TAKE | vault OR ADDRESS_THIS | 0x20 (32 bytes) |
+| `0x0e` | TAKE | vault OR ADDRESS_THIS | `(currency, recipient, amount)` — recipient at param offset 0x20 |
 | `0x0f` | TAKE_ALL | Safe (uses msgSender = vault) | — |
-| `0x10` | TAKE_PORTION | vault OR ADDRESS_THIS | 0x20 |
-| `0x11` | TAKE_PAIR | vault OR ADDRESS_THIS | 0x40 (64 bytes) |
-| `0x14` | SWEEP | vault (strict) | 0x20 |
+| `0x10` | TAKE_PORTION | vault OR ADDRESS_THIS | `(currency, recipient, amount)` — recipient at 0x20 |
+| `0x11` | TAKE_PAIR | vault OR ADDRESS_THIS | `(currency0, currency1, recipient)` — recipient at 0x40 |
+| `0x14` | SWEEP | vault (strict) | `(currency, recipient, amount)` — recipient at 0x20 |
+
+**Note:** This is the UniversalRouterValidator's V4_SWAP parsing — recipients may only be the vault or `ADDRESS_THIS` (0x2). The `MSG_SENDER` sentinel (0x1) is only accepted by the standalone UniswapV4PositionValidator (see below).
 
 ### Multi-Hop Pattern
 
@@ -133,10 +135,10 @@ Signature pattern: `swap*(uint256, uint256, Path, address to, uint256)`
 
 | Selector | Function |
 |---|---|
-| `0x53b13d6d` | `swapExactTokensForTokens` |
-| `0x57ea03ba` | `swapExactTokensForNATIVE` |
-| `0x67bfb98a` | `swapTokensForExactTokens` |
-| `0xe4a26194` | `swapTokensForExactNATIVE` |
+| `0x2a443fae` | `swapExactTokensForTokens` |
+| `0x9ab6156b` | `swapExactTokensForNATIVE` |
+| `0x92fe8e70` | `swapTokensForExactTokens` |
+| `0x3dc8f8ec` | `swapTokensForExactNATIVE` |
 
 ### 4-Param Group — `to` at byte 68
 
@@ -145,8 +147,8 @@ Signature pattern: `swap*(uint256, Path, address to, uint256)`
 
 | Selector | Function |
 |---|---|
-| `0x414bf569` | `swapExactNATIVEForTokens` |
-| `0xaa18af95` | `swapNATIVEForExactTokens` |
+| `0xb066ea7c` | `swapExactNATIVEForTokens` |
+| `0x2075ad22` | `swapNATIVEForExactTokens` |
 
 **Parsing:** Extract selector from `data[0:4]`, determine offset group, decode `data[offset:offset+32]` as address, require address == vault.
 
@@ -298,23 +300,30 @@ Adds 32 (Solidity memory length word) + offset to get absolute memory position.
 **Source:** `contracts/validators/TJPositionValidator.sol`
 **Implements:** ILiquidityValidator
 
-Two-tier validation: `createPosition` gets a vault param check (no existing position to look up), while the other 4 operations use selector-only validation since TJPositionManager enforces `pos.vault == msg.sender` internally.
+Two-tier validation: `createPosition` gets an owner param check (no existing position to look up), while the other 4 operations use selector-only validation since TJPositionManager enforces `pos.owner == msg.sender` internally.
 
 ### Selectors
 
 | Operation | Function Validated | Validation |
 |---|---|---|
-| `validateMint` | `createPosition(address,address,uint256,...,uint256)` | Selector + vault param check (`data[4:36]`) |
+| `validateMint` | `createPosition(address,address,uint256,...,uint256)` | Selector + owner param check (`data[4:36]`) |
 | `validateIncreaseLiquidity` | `addToPosition(uint256,uint256[],...,uint256)` | Selector only |
 | `validateDecreaseLiquidity` | `removePosition(uint256,uint256[],...,uint256)` OR `decreaseLiquidity(uint256,uint256,...,uint256)` | Selector only (both accepted) |
 | `validateCollect` | `collectFees(uint256,uint256[],...,uint256)` | Selector only |
 | `validateBurn` | — | Reverts "not yet implemented" |
 
-**createPosition** (the only function with a vault param):
+**createPosition** (the only function with an owner param):
 ```solidity
-address calldataVault = abi.decode(data[4:36], (address));
-require(calldataVault == vault, "TJPositionValidator: vault mismatch");
+function validateMint(bytes calldata data, address caller) external pure override {
+    require(data.length >= 36, "TJPositionValidator: invalid data");
+    bytes4 selector = bytes4(data[:4]);
+    require(selector == CREATE_POSITION_SELECTOR, "TJPositionValidator: not createPosition");
+    address calldataOwner = abi.decode(data[4:36], (address));
+    require(calldataOwner == caller, "TJPositionValidator: owner mismatch");
+}
 ```
+
+The `caller` parameter is the vault address passed by VaultFactory.validateMint. The check ensures the owner field in createPosition calldata matches the vault calling the manager.
 
 **All other operations** (selector-only):
 ```solidity
@@ -323,7 +332,7 @@ bytes4 selector = bytes4(data[:4]);
 require(selector == EXPECTED_SELECTOR, "TJPositionValidator: not <functionName>");
 ```
 
-Why selector-only is secure for existing positions: TJPositionManager stores `pos.vault` at creation and enforces `require(pos.vault == msg.sender)` on every operation. Since `msg.sender` is unforgeable and `pos.vault` is trusted on-chain state, there's no calldata the executor could craft to operate on another vault's position.
+Why selector-only is secure for existing positions: TJPositionManager stores `pos.owner` at creation and enforces `require(pos.owner == msg.sender)` on every operation. Since `msg.sender` is unforgeable and `pos.owner` is trusted on-chain state, there's no calldata the executor could craft to operate on another vault's position.
 
 ---
 
@@ -371,7 +380,7 @@ Used by: UniswapV3PositionValidator (multicall unwrapping). The `32` accounts fo
 uint256 value;
 assembly { value := calldataload(add(data.offset, position)) }
 ```
-Used by: UniswapV4PositionValidator (_decodeUnlockData). Direct calldata access is cheaper than copying to memory for complex nested structures.
+Used by: UniswapV4PositionValidator (_decodeUnlockData) for navigating deeply nested ABI; MerklIncentiveValidator for the simple single-address extraction at offset 4. Direct calldata access is cheaper than copying to memory for complex nested structures.
 
 ### 4. _extractAddress Helper
 
@@ -394,7 +403,8 @@ Used by: UniswapV4PositionValidator. Extracts addresses from already-decoded par
 | V4 TAKE_PAIR.recipient | 3rd of 3 fields | 0x40 (64) | 2×32 |
 | TJ 5-param swap.to | 4th of 5 params | 100 | 4 + 3×32 |
 | TJ 4-param swap.to | 3rd of 4 params | 68 | 4 + 2×32 |
-| TJ all position ops.vault | 1st param | 4 | 4 + 0×32 |
+| TJ createPosition.owner | 1st param | 4 | 4 + 0×32 |
+| Merkl claim.user | 1st param | 4 | 4 + 0×32 |
 
 ---
 
@@ -408,12 +418,13 @@ What the validator system guarantees:
 4. **Executor limitations** — Even with a compromised executor key, the attacker cannot extract tokens because all operations route tokens back to the vault. The `execute()` function (raw calls, no validation) is owner-only
 5. **Factory-mediated dispatch** — Validators are registered centrally in VaultFactory. A vault cannot bypass validation or use unregistered validators
 6. **No validator = no execution** — If no validator is registered for a target contract, the factory reverts. New platforms cannot be used until validators are deployed and registered
+7. **Executor gas funding is the one legitimate vault-to-non-vault ETH movement** — `setExecutor` (payable) and `fundExecutor(amount)` both send native ETH from the vault to the registered executor address. These bypass the validator system because there is no external call to validate; they transfer ETH directly. The executor address itself is set by `onlyOwner`, so the owner chooses who can receive these funds
 
 ---
 
 ## Adding a New Validator
 
-1. **Determine interface** — Is the target a swap router (ISwapValidator) or position manager (ILiquidityValidator)?
+1. **Determine interface** — Is the target a swap router (ISwapValidator), a position manager (ILiquidityValidator), or an incentive/reward contract (IIncentiveValidator)?
 2. **Study calldata format** — Use the target contract's ABI to understand function signatures and parameter ordering. Identify which parameters contain recipient/owner addresses
 3. **Implement validator** — For each function:
    - Extract the function selector from `data[0:4]`
@@ -421,7 +432,7 @@ What the validator system guarantees:
    - Decode and validate the address
 4. **Handle batch/nested patterns** — If the target uses multicall, batch operations, or nested encoding (like Universal Router commands or V4 actions), parse the outer structure first, then validate each inner operation
 5. **Choose parsing technique** — Use `abi.decode` for simple cases, assembly for performance-critical or deeply nested structures
-6. **Deploy and register** — Deploy the validator, then call `factory.setSwapValidator` or `factory.setLiquidityValidator` with the target contract address as key
+6. **Deploy and register** — Deploy the validator, then call `factory.setSwapValidator`, `factory.setLiquidityValidator`, or `factory.setIncentiveValidator` with the target contract address as key
 7. **Test checklist:**
    - Valid operations with vault as recipient pass
    - Operations with non-vault recipient revert

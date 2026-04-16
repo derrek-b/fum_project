@@ -27,13 +27,13 @@ npm run generate-fees:av       # Generate fees on WAVAX/USDC (TJ V2.2, supports 
 
 | Script | What it does |
 |---|---|
-| `seed-localhost` | V3: vault + tokens + position on wallet |
+| `seed-localhost` | V3: vault + tokens + position on wallet + generated fees |
 | `seed-localhost:strategy` | + strategy + targets |
-| `seed-localhost:automation` | + strategy + position in vault + executor (triggers automation) |
+| `seed-localhost:automation` | + strategy + position moved into vault + executor (triggers automation) |
 | `seed-localhost:v4` / `:v4:strategy` / `:v4:automation` | Same pattern for Uniswap V4 |
-| `seed-localhost:av` | Avalanche TJ: vault + tokens + position on wallet |
+| `seed-localhost:av` | Avalanche TJ: vault + tokens (position only with `ENABLE_POSITION=1`) |
 | `seed-localhost:av:strategy` | + strategy + targets |
-| `seed-localhost:av:automation` | + strategy + position moved into vault + executor (triggers automation) |
+| `seed-localhost:av:automation` | + strategy + position minted in vault + executor (triggers automation) |
 
 **Local frontend dev flow**: `npm run hardhat` → (new terminal) `npm run seed-localhost` → `npm run dev`
 
@@ -42,16 +42,17 @@ npm run generate-fees:av       # Generate fees on WAVAX/USDC (TJ V2.2, supports 
 ```
 src/
 ├── components/
-│   ├── common/          # Navbar, WalletConnect, PriceRangeChart, AutomationStatus
-│   ├── positions/       # Position cards, add/remove liquidity, claim fees modals
+│   ├── common/          # Navbar, WalletConnect, PriceRangeChart, AutomationStatus, RefreshControls
+│   ├── positions/       # Position cards, add/remove liquidity, claim fees, close position modals
 │   ├── transactions/    # Transaction history list
-│   └── vaults/          # Vault cards, strategy config, deposit/withdraw modals
-├── hooks/               # useProviders, useReadProvider, useWriteProvider, useAutomationEvents
-├── pages/               # Next.js Pages Router (index, demo, vaults, positions)
-├── redux/               # Redux Toolkit slices (vaults, positions, pools, tokens, strategies, etc.)
-├── context/             # ProviderContext, ToastContext
+│   └── vaults/          # Vault cards, strategy config, deposit/withdraw/fund-executor modals
+├── hooks/               # useProviders, useReadProvider, useWriteProvider, useAutomationEvents, useModalData
+├── pages/               # Next.js Pages Router (index, demo, vaults, positions, vault/[address], position/[id], _error)
+├── redux/               # Redux Toolkit slices (wallet, vaults, positions, strategies, platforms, automation, updates)
+├── context/             # ToastContext (singular dir)
+├── contexts/            # ProviderContext — ethers providers (plural dir)
 ├── styles/              # Global CSS + modules
-└── utils/               # Strategy icons, vault helpers
+└── utils/               # vaultsHelpers, sseEventHandlers, strategyIcons
 
 contracts/
 ├── PositionVault.sol         # Core vault — holds tokens, ETH, LP positions
@@ -70,7 +71,7 @@ scripts/
 ├── extract-bytecode.js             # Extract bytecode from fum_testing artifacts
 └── deploy.js                       # Chain-agnostic deployment + address tracking
 
-deployments/                  # Deployment address records (1337-latest.json, 42161-latest.json)
+deployments/                  # Deployment address records (1337-latest.json, 1338-latest.json, 42161-latest.json)
 test/scripts/                 # Local dev helpers (start-hardhat, seed, generate-fees, manipulate-price)
 ```
 
@@ -79,7 +80,7 @@ test/scripts/                 # Local dev helpers (start-hardhat, seed, generate
 - **Framework**: Next.js 15, Pages Router, React 19, Redux Toolkit
 - **Blockchain**: ethers.js v5 (not v6)
 - **Styling**: React-Bootstrap + Bootstrap 5, global CSS
-- **State**: Redux slices for all domain data (vaults, positions, pools, tokens, strategies)
+- **State**: Redux slices for all domain data (wallet, vaults, positions, strategies, platforms, automation, updates) — pool/token data embedded in position objects and vault `tokenBalances`, no separate pools/tokens slices
 - **Wallet**: Web3Modal for connection, custom hooks for read/write providers
 - **Contracts**: Solidity ^0.8.0, OpenZeppelin v5
 

@@ -246,7 +246,7 @@ Spawns a Hardhat node with a mainnet fork, auto-deploys contracts, and updates f
 | Chain ID | 1337 | 1338 |
 | Port | 8545 | 8546 |
 | Config | `hardhat.config.cjs` | `hardhat-avalanche.config.cjs` |
-| Extra contracts | V3/V4 validators | TJ validators, TJPositionManager, TJPositionProxy |
+| Extra contracts | V3 + V4 position validators, UniversalRouterValidator, MerklIncentiveValidator | TJPositionProxy, TJPositionManager, TJSwapValidator, TJPositionValidator |
 
 **Sequence (both):**
 1. Spawn `npx hardhat node --port {port}` (Cancun hardfork for V4 transient storage)
@@ -263,6 +263,8 @@ The Avalanche script additionally deploys TJPositionProxy (implementation) and T
 ### Seed Scripts (per-platform)
 
 Each platform has a single combined seed script that creates a vault, funds it, and optionally configures strategy/automation. The old separate `create-test-vault.js` + `seed.js` two-step flow was replaced to eliminate race conditions where `setExecutor` triggered the automation service before the vault was fully configured.
+
+> `test/scripts/create-test-vault.js` and `test/scripts/create-test-vault-avalanche.js` still exist for direct invocation (`node test/scripts/create-test-vault.js ...`), but no npm script wraps them. Prefer the per-platform seed scripts below.
 
 **Scripts:**
 - `seed.js` — Uniswap V3 (WETH/USDC on chain 1337)

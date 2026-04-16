@@ -1,14 +1,16 @@
 # F.U.M. Integration Testing Guide
 
-This document describes the full integration testing setup for the F.U.M. ecosystem, which requires coordination between three repositories and a local blockchain environment.
+This document describes the full integration testing setup for the F.U.M. ecosystem, which coordinates sibling subprojects in the monorepo against a local blockchain fork.
 
 ## Overview
 
 Full integration testing simulates the complete F.U.M. workflow:
-1. A forked Arbitrum blockchain running locally via Hardhat
-2. Deployed smart contracts (VaultFactory, PositionVault, Strategies)
+1. A forked Arbitrum or Avalanche blockchain running locally via Hardhat
+2. Deployed smart contracts (VaultFactory, PositionVault, strategies, validators, TJPositionManager/Proxy on Avalanche)
 3. The automation service monitoring and managing positions
 4. The frontend for user interaction
+
+Three testable platforms: Uniswap V3 (Arbitrum), Uniswap V4 (Arbitrum), Trader Joe V2.2 (Avalanche).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -31,21 +33,21 @@ Full integration testing simulates the complete F.U.M. workflow:
 
 ## Prerequisites
 
-### Required Repositories
+### Monorepo Layout
 
-Clone all repositories into the same parent directory:
+All four subprojects live as siblings in the monorepo root (`fum_project/`):
 
 ```
-code/
+fum_project/
 ├── fum/              # Frontend + Smart Contracts
-├── fum_library/      # Shared utilities (must be built)
+├── fum_library/      # Shared utilities (must be built: `cd fum_library && npm run pack`)
 ├── fum_automation/   # Automation service
-└── fum_testing/      # Contract unit tests (optional)
+└── fum_testing/      # Contract unit tests
 ```
 
 ### Environment Setup
 
-1. **Alchemy API Key** - Required for forking Arbitrum mainnet
+1. **Alchemy API Key** - Required for forking Arbitrum or Avalanche mainnet
 2. **Node.js 22+** - Required for ES module JSON import syntax (`with { type: 'json' }`)
 3. **MetaMask or another Ethereum wallet** - For frontend wallet interaction
 
@@ -57,6 +59,7 @@ NEXT_PUBLIC_SSE_URL=http://localhost:3001/events
 NEXT_PUBLIC_DEMO_ADDRESS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
 NEXT_PUBLIC_DEMO_CHAIN_ID=1337
 NEXT_PUBLIC_ALCHEMY_API_KEY=your_alchemy_api_key
+NEXT_PUBLIC_COINGECKO_API_KEY=your_coingecko_api_key
 ```
 
 **fum_automation/.env.local**:
@@ -93,11 +96,14 @@ npm run hardhat
 
 Hardhat will:
 - Fork Arbitrum at a recent block
-- Deploy VaultFactory, PositionVault, and Strategy contracts
-- Update contract addresses in `fum_library` src directory
+- Deploy VaultFactory, BabyStepsStrategy, and all V3/V4 + Merkl validators
+- Register validators with the VaultFactory
+- Write deployed addresses into the `fum_library` source tree (`fum_library/src+dist/artifacts/contracts.js`)
 - Output test account private keys
 
-**Keep this terminal running.**
+> **Run `npm run pack` after Hardhat starts.** The addresses only land in the fum_library source tree — fum and fum_automation consume fum_library via the installed tarball, so a repack is required to propagate addresses to their `node_modules/`. See scripts-pipeline.md's "forgot to pack" warning.
+
+**Keep this terminal running.** For Trader Joe testing on Avalanche, use `npm run hardhat:av` (port 8546, chain 1338) instead — it additionally deploys TJPositionProxy, TJPositionManager, and TJ validators.
 
 ### Step 2: Seed Test Data
 
@@ -105,25 +111,26 @@ Create a test vault and liquidity position:
 
 ```bash
 cd fum
-npm run seed-localhost
+npm run seed-localhost                       # V3: vault + tokens + position on wallet + generated fees
+# OR variants:
+# npm run seed-localhost:strategy            # + strategy + targets
+# npm run seed-localhost:automation          # + strategy + position moved into vault + executor (triggers automation)
+# npm run seed-localhost:v4[:strategy|:automation]
+# npm run seed-localhost:av[:strategy|:automation]   # Trader Joe on Avalanche (requires npm run hardhat:av)
 ```
 
-This script:
+Base `seed-localhost` script:
 - Creates a vault via VaultFactory
-- Mints a WETH/USDC liquidity position on Uniswap V3
+- Funds the wallet with WETH/USDC
+- Mints a WETH/USDC liquidity position on Uniswap V3 **to the wallet** (for transfer-testing)
 - Transfers tokens to the vault
-- Executes a couple trades to generate fees to collect for the WETH/USDC position
+- Runs round-trip swaps to generate fees on the position
 
-### Step 3: Update fum_library (After Contract Deployment)
+With `ENABLE_AUTOMATION=1` (the `:automation` variant), the V3/V4 position is moved into the vault; for TJ (Avalanche), positions are minted inside the vault via `vault.mint()`.
 
-After Hardhat deploys contracts, update fum_library so other projects use the new addresses:
+See **Seed Flag Variants** below for full details.
 
-```bash
-cd fum_library
-npm run pack  # Rebuilds and reinstalls library to fum and fum_automation with new addresses
-```
-
-### Step 4: Start Automation Service
+### Step 3: Start Automation Service
 
 ```bash
 cd fum_automation
@@ -138,7 +145,7 @@ The automation service will:
 
 **Keep this terminal running.**
 
-### Step 5: Start Frontend
+### Step 4: Start Frontend
 
 ```bash
 cd fum
@@ -162,53 +169,86 @@ Open `http://localhost:3000` and connect MetaMask:
 
 ## Vault Testing Scenarios
 
-### Price Manipulation
+### Price Manipulation (Uniswap V3, default)
 
 Simulate price movements to trigger rebalancing:
 
 ```bash
-# Push USDC price up (buy pressure)
-npm run manipulate-price:up
+npm run manipulate-price:up       # Push WETH/USDC price up (buy WETH)
+npm run manipulate-price:down     # Push WETH/USDC price down (sell WETH)
 
-# Push USDC price down (sell pressure)
-npm run manipulate-price:down
-
-# Generate fees on USDC/USDT pool (default)
-npm run generate-fees
-
-# Generate fees for other token pairs
-npm run generate-fees:weth    # USDC/WETH (0.05% pool)
-npm run generate-fees:wbtc    # USDC/WBTC (0.05% pool)
-npm run generate-fees:link    # USDC/LINK (0.3% pool)
-
-# Custom options
-npm run generate-fees -- --swaps=10           # More round-trip swaps (default: 5)
-npm run generate-fees -- --token=WETH         # Specify token
-npm run generate-fees -- --fee=3000           # Override fee tier (100, 500, 3000, 10000)
-npm run generate-fees:weth -- --fee=3000      # WETH on 0.3% pool instead of default 0.05%
+# With flags:
+node test/scripts/manipulate-price.js --direction=up --token=LINK      # V3 WETH/LINK
+node test/scripts/manipulate-price.js --direction=up --platform=v4     # V4 ETH/USDC
 ```
 
-**Token defaults:**
-| Token | Default Fee Tier | Swap Amount |
-|-------|-----------------|-------------|
-| USDT  | 100 (0.01%)     | 250,000 USDC |
-| WETH  | 500 (0.05%)     | 10,000 USDC |
-| WBTC  | 500 (0.05%)     | 10,000 USDC |
-| LINK  | 3000 (0.3%)     | 10,000 USDC |
+### Fee Generation (Uniswap V3, default)
 
-> **Note:** These scripts interact with forked Uniswap V3 pools. Depending on pool liquidity and price state at the time of the fork, you may need to run them multiple times to achieve the desired effect. Large swaps may fail if they exceed available liquidity at the current price tick.
+```bash
+npm run generate-fees             # V3 WETH/USDC 0.05% (default)
+npm run generate-fees:usdt        # V3 WETH/USDT 0.05%
+npm run generate-fees:wbtc        # V3 WETH/WBTC 0.05%
+npm run generate-fees:link        # V3 WETH/LINK 0.30%
+npm run generate-fees:v4          # V4 ETH/USDC 0.05%
 
-> **Important:** The default `generate-fees` uses USDC/USDT stablecoin pairs. To trigger rebalances, you must first configure the vault's strategy via the frontend UI with tight range parameters:
+# Custom flags (pass through `--`):
+npm run generate-fees -- --swaps=20                         # Default is 5
+npm run generate-fees -- --platform=v4 --token=LINK         # V4 ETH/LINK 0.30%
+```
+
+Each round-trip swaps **1 WETH** → token → back to WETH. Volume accrues fees to LP positions.
+
+**Token defaults** (from `test/scripts/generate-fees.js`):
+| Token | Pool (V3) | Pool (V4) | Fee Tier |
+|-------|-----------|-----------|----------|
+| WETH  | WETH/USDC | ETH/USDC  | 0.05% |
+| USDT  | WETH/USDT | ETH/USDT  | 0.05% |
+| WBTC  | WETH/WBTC | ETH/WBTC  | 0.05% |
+| LINK  | WETH/LINK | ETH/LINK  | 0.30% |
+
+> **Note:** These scripts interact with forked pools. Depending on pool liquidity and price state at the time of the fork, you may need to run them multiple times. Large swaps may fail if they exceed available liquidity at the current tick.
+
+> **Important:** To trigger rebalances in the local sandbox, configure a narrow strategy range via the frontend:
 >
 > 1. Set the vault's strategy to **BabySteps**
-> 2. Select the **Stablecoin** template
-> 3. Customize range parameters for testing:
->    - **Upper/Lower Range:** 5 bps (0.05%) - creates a ±10 tick range
->    - **Upper/Lower Threshold:** 20% - triggers rebalance when price is within 2 ticks of the range edge
->    - **Fee Reinvest Trigger:** $5 (minimum) - allows fee collection to trigger with smaller amounts
+> 2. Select the **Stablecoin** template (for USDC/USDT-style pairs) or set tight custom ranges for WETH/USDC
+> 3. Customize for tight-range testing:
+>    - **Upper/Lower Range:** 5 bps (0.05%)
+>    - **Upper/Lower Threshold:** 20%
+>    - **Fee Reinvest Trigger:** $5 (minimum)
 > 4. Enable automation
 >
-> With default or wider range settings, the price manipulation swaps can't move the price enough to trigger rebalances before exhausting liquidity in the Hardhat sandbox environment.
+> With default or wider range settings, the price-manipulation swaps can't move price far enough to trigger rebalances before exhausting liquidity in the Hardhat sandbox.
+
+### Price Manipulation & Fees on Avalanche (Trader Joe V2.2)
+
+Requires `npm run hardhat:av` running (port 8546, chain 1338):
+
+```bash
+npm run manipulate-price:av:up                                  # WAVAX/USDC
+npm run manipulate-price:av:down
+node test/scripts/manipulate-price-avalanche.js --direction=up --token=USDT    # USDC/USDT
+node test/scripts/manipulate-price-avalanche.js --direction=up --token=AUSD    # USDC/AUSD
+
+npm run generate-fees:av                                        # WAVAX/USDC (10 WAVAX/leg)
+node test/scripts/generate-fees-avalanche.js --token=USDT       # USDC/USDT (1000 USDC/leg)
+node test/scripts/generate-fees-avalanche.js --token=AUSD       # USDC/AUSD
+```
+
+TJ price manipulation drains 2 active bins per run (~0.2% movement at binStep=10 WAVAX/USDC). Seed position range is ±10 bins, so ~5 runs pushes out of range.
+
+### Seed Flag Variants
+
+The seed scripts accept environment flags:
+
+| Flag | Effect |
+|------|--------|
+| (none) | Create vault + fund wallet with tokens + transfer tokens to vault. V3/V4: mint position on wallet + generate fees. TJ: tokens only. |
+| `ENABLE_STRATEGY=1` | + set target platform/tokens + configure BabySteps Aggressive strategy |
+| `ENABLE_AUTOMATION=1` | Implies `ENABLE_STRATEGY=1`. V3/V4: move position into vault. TJ: mint position inside vault via `vault.mint()`. Then set executor (triggers automation service). |
+| `ENABLE_POSITION=1` | (Avalanche only — with base `seed-localhost:av`) Create TJ position in vault + generate fees |
+
+The executor is always set **last** to avoid race conditions where the automation service picks up a half-configured vault.
 
 ### What to Observe
 
@@ -283,6 +323,13 @@ cd fum_library
 npm run pack  # Rebuilds and reinstalls library to fum and fum_automation
 ```
 
+**Addresses out of date after restarting Hardhat:** `npm run hardhat` and `npm run hardhat:av` write deployed addresses to `fum_library/src+dist/artifacts/contracts.js` (the fum_library source tree), but fum and fum_automation consume fum_library via the installed tarball in their respective `node_modules/`. The tarball is frozen until it's rebuilt and reinstalled. After every Hardhat restart, run:
+
+```bash
+cd fum_library
+npm run pack   # rebuilds, packs, and reinstalls into fum and fum_automation
+```
+
 ### Automation Connection Issues
 
 **"SSE connection failed":**
@@ -301,12 +348,17 @@ npm run pack  # Rebuilds and reinstalls library to fum and fum_automation
 
 | Path | Purpose |
 |------|---------|
-| `fum/test/scripts/start-hardhat.js` | Hardhat startup + contract deployment |
-| `fum/test/scripts/create-test-vault.js` | Creates test vault via VaultFactory |
-| `fum/test/scripts/seed.js` | Test data seeding (position, tokens, fees) |
-| `fum/test/scripts/manipulate-price.js` | Price manipulation for testing |
-| `fum/test/scripts/generate-fees.js` | Fee generation for testing |
-| `fum/deployments/1337-latest.json` | Deployed contract addresses |
+| `fum/test/scripts/start-hardhat.js` | Arbitrum-fork Hardhat startup + contract deployment |
+| `fum/test/scripts/start-hardhat-avalanche.js` | Avalanche-fork Hardhat startup + contract deployment |
+| `fum/test/scripts/seed.js` | V3 Arbitrum seeding (vault, tokens, position, fees) |
+| `fum/test/scripts/seed-v4.js` | V4 Arbitrum seeding |
+| `fum/test/scripts/seed-avalanche.js` | TJ Avalanche seeding |
+| `fum/test/scripts/manipulate-price.js` | V3/V4 Arbitrum price manipulation |
+| `fum/test/scripts/manipulate-price-avalanche.js` | TJ Avalanche price manipulation |
+| `fum/test/scripts/generate-fees.js` | V3/V4 Arbitrum fee generation |
+| `fum/test/scripts/generate-fees-avalanche.js` | TJ Avalanche fee generation |
+| `fum/test/scripts/create-test-vault.js`, `-avalanche.js` | Legacy (direct invocation only, not wired to npm) |
+| `fum/deployments/{chainId}-latest.json` | Deployed contract addresses per chain (1337, 1338, 42161) |
 | `fum_library/dist/` | Built library modules |
 | `fum_automation/data/` | Vault transaction & state cache |
 
@@ -314,13 +366,18 @@ npm run pack  # Rebuilds and reinstalls library to fum and fum_automation
 
 | Script | Location | Description |
 |--------|----------|-------------|
-| `npm run hardhat` | fum | Start Hardhat with Arbitrum fork |
-| `npm run seed-localhost` | fum | Create test vault and position |
-| `npm run manipulate-price:up` | fum | Simulate price increase |
-| `npm run manipulate-price:down` | fum | Simulate price decrease |
-| `npm run generate-fees` | fum | Generate fees on USDC/USDT (0.01%) |
-| `npm run generate-fees:weth` | fum | Generate fees on USDC/WETH (0.05%) |
-| `npm run generate-fees:wbtc` | fum | Generate fees on USDC/WBTC (0.05%) |
-| `npm run generate-fees:link` | fum | Generate fees on USDC/LINK (0.3%) |
+| `npm run hardhat` | fum | Arbitrum fork (chain 1337, port 8545) + deploy V3/V4/Merkl contracts |
+| `npm run hardhat:av` | fum | Avalanche fork (chain 1338, port 8546) + deploy TJ contracts |
+| `npm run seed-localhost` | fum | V3 vault + tokens + position on wallet + fees |
+| `npm run seed-localhost:strategy` | fum | + strategy & target config |
+| `npm run seed-localhost:automation` | fum | + position in vault + executor (triggers automation) |
+| `npm run seed-localhost:v4[:strategy|:automation]` | fum | V4 variants |
+| `npm run seed-localhost:av[:strategy|:automation]` | fum | TJ/Avalanche variants |
+| `npm run manipulate-price:up` / `:down` | fum | V3 WETH/USDC price movement |
+| `npm run manipulate-price:v4:up` / `:v4:down` | fum | V4 ETH/USDC price movement |
+| `npm run manipulate-price:av:up` / `:av:down` | fum | TJ WAVAX/USDC price movement |
+| `npm run generate-fees` (+ `:usdt` / `:wbtc` / `:link` / `:v4`) | fum | Fee generation (see Fee Generation section) |
+| `npm run generate-fees:av` | fum | TJ WAVAX/USDC fee generation |
+| `npm run contracts:test` | fum | Run contract unit tests in fum_testing |
+| `npm run contracts:test:coverage` | fum | Run coverage report in fum_testing |
 | `npm run start` | fum_automation | Start automation service |
-| `npm run contracts:test` | fum | Run contract unit tests |

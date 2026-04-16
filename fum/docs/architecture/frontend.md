@@ -54,7 +54,7 @@ Two providers serve different purposes:
 
 ## Redux State Shape
 
-**Store:** `src/redux/store.js` — 9 slices
+**Store:** `src/redux/store.js` — 7 slices: `wallet`, `positions`, `vaults`, `strategies`, `platforms`, `automation`, `updates`. Pool and token data live embedded inside position objects and vault `tokenBalances` — there is no separate pools or tokens slice.
 
 ### state.wallet
 
@@ -63,7 +63,7 @@ Two providers serve different purposes:
 ```javascript
 {
   address: string | null,        // "0x..." wallet address
-  chainId: number | null,        // 42161 (Arbitrum), 1337 (localhost)
+  chainId: number | null,        // 42161 (Arbitrum), 43114 (Avalanche), 1337 (Arbitrum localhost), 1338 (Avalanche localhost)
   isConnected: boolean,          // true after successful connection
   isReconnecting: boolean        // true during auto-reconnect
 }
@@ -73,7 +73,7 @@ Persisted to `localStorage["fum_wallet_connection"]`. Reducers: `setWallet`, `di
 
 ### state.vaults
 
-**Source:** `src/redux/vaultsSlice.js` — The most complex slice (15 reducers)
+**Source:** `src/redux/vaultsSlice.js` — The most complex slice (13 in-slice reducers + 2 cross-slice extraReducers)
 
 ```javascript
 {
@@ -297,21 +297,18 @@ The vault detail page also hydrates from Redux when VaultsContainer has already 
 
 `loadVaultData(userAddress, provider, chainId, dispatch)` orchestrates the full loading sequence:
 
-1. `loadVaultStrategies()` → `dispatch(setAvailableStrategies(...))`
+1. `loadVaultStrategies()` → `dispatch(setAvailableStrategies(...))` + per-strategy `setStrategyAddress`
 2. Get user vault addresses from VaultFactory
-3. **First pass:** `loadVaultBasicInfo()` for each vault (skip metrics)
-4. Get non-vault positions from adapters
-5. Merge pool data from all sources
-6. `dispatch(setPools(...))`, `dispatch(setPositions(...))`
-7. **Prefetch all token prices** at once (batch CoinGecko call)
-8. **Second pass:** Calculate TVL for each vault
-9. `loadVaultTokenBalances()` for each vault
-10. Fetch blacklist data from automation service
-11. Fetch funding-required data from automation service
-12. Fetch tracker data for all vaults (parallel)
-13. `dispatch(setVaults(completeVaultsData))`
+3. **First pass:** `getVaultData()` for each vault with `skipMetricsUpdate: true` — dispatches `updateVault`, `addVaultPositions`, `updateVaultTokenBalances`, `updateVaultStrategy`, `updateVaultTrackerData`
+4. Get non-vault positions from adapters, filter out any already held in vaults
+5. `dispatch(setPositions(walletPositions))` — wallet-only positions, marked `inVault: false`
+6. **Prefetch all token prices** at once (batch CoinGecko call, 30s cache)
+7. **Second pass:** Calculate TVL for each vault using fetched prices
+8. Fetch blacklist + funding-required data from automation service REST endpoints
+9. Fetch tracker data for all vaults (parallel)
+10. `dispatch(setVaults(completeVaultsData))` — final vault array with finalized metrics
 
-**Single vault refresh:** `getVaultData(vaultAddress, ...)` runs steps 1–6 for one vault.
+**Single vault refresh:** `getVaultData(vaultAddress, ...)` loads one vault's basic info, token balances, positions, and (optionally) tracker data — used on vault detail navigation and as the per-vault unit inside `loadVaultData`.
 
 ---
 
@@ -374,8 +371,11 @@ Instead of invalidating freshness timestamps, SSE events trigger **targeted data
 |---|---|---|
 | `/` | `pages/index.js` | Landing page with links to Vaults, Positions, Demo |
 | `/vaults` | `pages/vaults.js` | Vault management dashboard |
+| `/vault/[address]` | `pages/vault/[address].js` | Vault detail page (positions, token balances, strategy, tracker) |
 | `/positions` | `pages/positions.js` | Position management dashboard |
-| `/demo` | `pages/demo.js` | Demo/test page |
+| `/position/[id]` | `pages/position/[id].js` | Position detail page |
+| `/demo` | `pages/demo.js` | Showcase page with configurable demo vault address |
+| *404 / 500* | `pages/_error.js` | Custom error page with retry button |
 
 ---
 
@@ -397,10 +397,11 @@ src/components/
 │   ├── StrategyDetailsSection.js       # Strategy details display
 │   ├── StrategyValidationModal.js      # Pre-deploy validation
 │   ├── StrategyDeactivationModal.js    # Remove strategy
-│   ├── AutomationModal.js             # Enable/disable automation
+│   ├── AutomationModal.js              # Enable/disable automation
 │   ├── CreateVaultModal.js             # Create new vault
 │   ├── TokenDepositModal.js            # Deposit tokens
 │   ├── TokenWithdrawModal.js           # Withdraw tokens
+│   ├── FundExecutorModal.js            # Top up executor gas (shown when isFundingRequired=true)
 │   └── PositionSelectionModal.js       # Select positions to move
 ├── positions/
 │   ├── PositionContainer.js            # Main positions list
@@ -429,7 +430,7 @@ src/components/
 - `.message` field → Truncate to 100 chars
 - String error → Use as-is
 
-**Explorer URLs:** Chain 1 → etherscan.io, Chain 42161 → arbiscan.io
+**Explorer URLs:** Per-chain block-explorer URLs resolved via `getChainConfig()` from fum_library — covers Arbitrum (arbiscan.io), Avalanche (snowtrace.io), Ethereum mainnet (etherscan.io), and local forks.
 
 **Auto-remove:** 5000ms timeout
 
@@ -440,7 +441,7 @@ src/components/
 1. **Providers in Context / data in Redux** — Provider objects can't be serialized; everything else goes in Redux
 2. **readProvider for reads / wallet provider for writes** — Never use the wallet provider for batch reads
 3. **Freshness-gated fetching + targeted SSE updates** — Pages check freshness timestamps before fetching. SSE events trigger targeted fetches via `sseEventHandlers.js` that dispatch directly to Redux (no freshness gate for known changes).
-4. **Token data embedded in pool objects** — Pool state includes full token metadata, not just addresses
+4. **Pool/token data embedded in position objects and vault `tokenBalances`** — No separate pools or tokens slice; adapters return position objects with pool state and token metadata already attached, and vault token balances carry full token info (symbol, decimals, logoURI, native flags)
 5. **Mixed positions array** — `state.positions` contains both wallet and vault positions, distinguished by `inVault` flag
 6. **Two context directories** — `context/` (singular, contains ToastContext) and `contexts/` (plural, contains ProviderContext)
 7. **vaultsHelpers.js is the data loading engine** — Async functions that accept `dispatch`, NOT hooks. Called from components and event handlers

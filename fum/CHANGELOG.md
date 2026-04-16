@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Major work since 2025-12-18 spanning multi-platform support, executor funding flows, and frontend architecture. Not yet versioned — this block will be split into release tags when cut.
+
+### Multi-Platform Support
+
+- **Uniswap V4** support: `UniswapV4PositionValidator` for V4 PositionManager ops (via nested action parsing inside `modifyLiquidities`), V4 command parsing inside `UniversalRouterValidator`, V4 seed/generate-fees/price-manipulation scripts.
+- **Trader Joe V2.2** support: `TJPositionManager` wraps LB (ERC1155) positions with auto-incrementing IDs, deploying a `TJPositionProxy` (EIP-1167 minimal proxy) per position for per-position fee attribution. `TJSwapValidator` and `TJPositionValidator` secure LBRouter swaps and position-manager ops respectively. Avalanche chain (1338 local, 43114 production) supported via `npm run hardhat:av`.
+- **TJPositionManager ownership model**: Position struct field renamed `vault → owner`; `getPositionsByVault → getPositionsByOwner`; added `safeTransferFrom(from, to, tokenId)` + `PositionTransferred` event for ERC721-like position transfers.
+
+### Incentive Validator Layer
+
+- New `IIncentiveValidator` interface; new incentive-validator registry on VaultFactory (`setIncentiveValidator`, `validateIncentive`).
+- `MerklIncentiveValidator` validates Merkl Distributor `claim(user, tokens, amounts, proofs)` calls, requiring `user == vault`.
+- New `PositionVault.incentive(targets, data, values)` function routes incentive claims through the validator chain.
+
+### Per-Vault Signer & Executor Funding
+
+- **VaultFactory v2.0.0**: `VaultInfo` struct gains `executorIndex` (monotonic counter assigned at `createVault`) for deterministic per-vault executor wallet derivation from an xpub/mnemonic. Added `getVersion()` returning `"2.0.0"`.
+- **Active Vault Registry**: VaultFactory now tracks the working set of vaults that have executors set. `registerActiveVault`/`deregisterActiveVault` (vault-callable only), `activeVaults[]`, `activeVaultIndex` mapping (1-indexed), `getActiveVaults()`, `getActiveVaultCount()`.
+- **PositionVault**: `setExecutor(address)` is now `payable` — `msg.value` is forwarded to the executor for initial gas funding. On first activation (executor `0x0` → non-zero) the vault registers with the factory's active-vault registry; `removeExecutor` deregisters.
+- **PositionVault**: new `fundExecutor(uint256 amount) payable onlyAuthorized` for on-demand/automated top-ups; emits new `ExecutorFunded` event.
+
+### BabyStepsStrategy v2.0.0 / ParrisIslandStrategy v0.4.0
+
+- BabyStepsStrategy bumped to 2.0.0 (source: `BabyStepsStrategy.sol`).
+- ParrisIslandStrategy advanced to v0.4.0 (still in development).
+
+### Frontend — Automation UX
+
+- `FundExecutorModal.js` shows when `isFundingRequired=true` on a vault.
+- New vault state: `isFundingRequired`, `fundingRequiredAt`. Cleared by `ExecutorFunded` or explicit admin flows.
+- SSE event additions/renames: `VaultFailed`/`VaultRecovered` replace `VaultLoadFailed`/`VaultLoadRecovered`; added `ExecutorFundingRequired`, `ExecutorFundingCleared`, `FeesDistributed`, `ExecutorFunded`, `NativeWrapped`, `NativeUnwrapped`.
+- Retry button on blacklisted vaults allows manual unblock without requiring vault auth re-grant.
+- Warn when saving strategy config for a token pair with no active pools on the selected platform.
+
+### Frontend — Data Flow
+
+- **Redux freshness strategy**: pages check per-domain freshness timestamps (`positionsLastFetched`, `vaultsLastFetched`, per-vault `lastUpdated`) before re-fetching. Stale >30s triggers re-fetch; fresh hits skip RPC.
+- **Targeted SSE updates**: `sseEventHandlers.js` dispatches directly to Redux for known events (e.g. `TokensSwapped` → `refreshTokenBalances`, `NewPositionCreated` → `refreshSinglePosition`), bypassing freshness gate.
+- **Adapter-level `getPositionsForDisplay`** interface; removed Redux pool/token cache — pool/token data now embedded in position objects and vault `tokenBalances`.
+- **`useModalData` hook** wraps per-platform adapter calls for the action modals, making them platform-agnostic.
+- Dual-provider refinement: `readProvider` race condition fix; stale-token ref cleanup; added `NEXT_PUBLIC_COINGECKO_API_KEY`.
+- Detail pages (`vault/[address]`, `position/[id]`) wire their own refresh intervals since they don't watch the global freshness timestamps. Manual refresh via `RefreshControls` also invalidates the global timestamps so list pages re-fetch on next navigation.
+- Context-aware navigation: post-close position redirect, back-link behavior.
+
+### Frontend — Validator-Aware UI
+
+- Close position flow now burns V3 NFT (burn allowed in V3 multicall) via `ClosePositionModal`.
+- Token filtering by chain in deposit modals.
+
+### Scripts & Tooling
+
+- Seed scripts combined per-platform (`seed.js`, `seed-v4.js`, `seed-avalanche.js`) with opt-in `ENABLE_STRATEGY`, `ENABLE_AUTOMATION`, `ENABLE_POSITION` flags. Old `create-test-vault.js` + `seed.js` two-step flow deprecated (files retained for manual invocation).
+- V3/V4/TJ price-manipulation and fee-generation scripts rewritten for multi-platform support. Uses `hardhat_setStorageAt` to mint tokens directly rather than pool swaps.
+- `npm run hardhat:av` spins up an Avalanche fork (chain 1338, port 8546) with TJ contracts deployed.
+- API query filtering: `/blacklist` and `/funding-required` endpoints accept `?vaults=addr1,addr2` to scope to a user's vaults.
+
+### Monorepo Migration
+
+- `fum`, `fum_library`, `fum_automation`, `fum_testing` consolidated into the `fum_project` monorepo (git subtree). Full history preserved. Single git repo, no external remotes.
+- CLAUDE.md files at root and per-subproject; architecture docs under `docs/` at each level; `/commit` and `/update-brain` workflow skills.
+
 ## [1.0.6] - 2025-12-18
 
 ### Platform-Agnostic Approval Model

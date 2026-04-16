@@ -1,16 +1,18 @@
 # F.U.M. - DeFi Liquidity Position Management & Automation
 
-A full-stack DeFi application for creating, managing, and automating Uniswap V3 liquidity positions. F.U.M. enables users to deploy personal vaults with configurable automation strategies for hands-off liquidity management.
+A full-stack DeFi application for creating, managing, and automating concentrated liquidity positions across multiple DEX platforms. F.U.M. enables users to deploy personal vaults with configurable automation strategies for hands-off liquidity management.
 
 ## Overview
 
 F.U.M. combines a Next.js frontend with Solidity smart contracts to provide:
 
-- **Personal Vaults** - Non-custodial smart contract vaults that hold your tokens and LP positions
-- **Uniswap V3 Integration** - Full support for Uniswap V3 concentrated liquidity positions
-- **Automated Strategies** - Configure rebalancing parameters and let the automation service manage your positions
-- **Real-Time Tracking** - Live updates via Server-Sent Events (SSE) connection to the automation service
-- **APY Analytics** - Track returns including fees earned and gas costs
+- **Personal Vaults** — Non-custodial smart contract vaults that hold ERC20 tokens, native ETH/AVAX, and LP positions
+- **Multi-Platform Support** — Uniswap V3, Uniswap V4, and Trader Joe V2.2 Liquidity Book (ERC1155-based)
+- **Multi-Chain Support** — Arbitrum (production), Avalanche (Trader Joe), Hardhat local forks
+- **Automated Strategies** — Configure rebalancing parameters and let the automation service manage your positions
+- **Incentive Claiming** — Validated Merkl Distributor claims to the vault
+- **Real-Time Tracking** — Live updates via Server-Sent Events (SSE) connection to the automation service
+- **APY Analytics** — Track returns including fees earned and gas costs
 
 ## Architecture
 
@@ -34,9 +36,8 @@ F.U.M. combines a Next.js frontend with Solidity smart contracts to provide:
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Smart Contracts                            │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────┐  │
-│  │ VaultFactory │  │PositionVault │  │   Strategy Contracts  │  │
-│  │   (v1.0.0)   │  │   (v1.2.0)   │  │ BabySteps (v1.0.0)    │  │
-│  │              │  │              │  │ ParrisIsland (v0.1.0) │  │
+│  │ VaultFactory │  │PositionVault │  │  Strategies + TJPM    │  │
+│  │ + Validators │  │              │  │  (see tables below)   │  │
 │  └──────────────┘  └──────────────┘  └───────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -54,15 +55,30 @@ F.U.M. combines a Next.js frontend with Solidity smart contracts to provide:
 
 | Contract | Version | Description |
 |----------|---------|-------------|
-| **PositionVault** | v1.2.0 | User-controlled vault holding ERC20 tokens, native ETH, and ERC721 position NFTs. Executes swaps, mints, liquidity operations with security validations. Supports native ETH deposits/withdrawals, ETH↔WETH wrapping/unwrapping, and EIP-1271 signature validation. |
-| **VaultFactory** | v1.0.0 | Factory contract for creating and tracking PositionVault instances. Maintains registry of user vaults. |
-| **BabyStepsStrategy** | v1.0.0 | Basic automation strategy with template-based parameters for range width, rebalance thresholds, fee reinvestment, and risk management. |
+| **PositionVault** | v1.3.0 | User-controlled vault holding ERC20 tokens, native ETH, and LP positions (V3/V4 ERC721 NFTs and Trader Joe LB positions via TJPositionManager). Executes validated swaps, mints, liquidity operations, incentive claims, and ETH↔WETH wrapping. Supports EIP-1271 signature validation, payable `setExecutor` for initial gas funding, and `fundExecutor` for automated top-ups. |
+| **VaultFactory** | v2.0.0 | Factory for creating and tracking vaults. Maintains three validator registries (swap, liquidity, incentive) and an active-vault registry that tracks only vaults with an executor set. Assigns each vault a monotonic `executorIndex` for deterministic executor wallet derivation. |
+| **BabyStepsStrategy** | v2.0.0 | Template-based automation strategy with parameters for range width, fee reinvestment, and risk management. |
+| **TJPositionManager** | — | Manages Trader Joe V2.2 liquidity bin positions via per-position EIP-1167 proxies for per-position fee attribution (off-chain fee math via LiquidityHelperContract). |
+| **TJPositionProxy** | — | Minimal EIP-1167 proxy cloned per Trader Joe position; holds ERC1155 LB tokens. |
+
+### Validators
+
+Central calldata-validation layer. Each validator enforces that operation recipients are the vault itself, blocking an attack path where a compromised executor could reroute funds.
+
+| Validator | Purpose |
+|-----------|---------|
+| UniversalRouterValidator | Uniswap Universal Router swap commands (V2/V3/V4, PERMIT2, WRAP/UNWRAP) |
+| UniswapV3PositionValidator | Uniswap V3 NonfungiblePositionManager ops |
+| UniswapV4PositionValidator | Uniswap V4 PositionManager ops |
+| TJSwapValidator | Trader Joe LBRouter swaps |
+| TJPositionValidator | TJPositionManager ops |
+| MerklIncentiveValidator | Merkl Distributor `claim()` calls |
 
 ### In Development
 
 | Contract | Version | Description |
 |----------|---------|-------------|
-| **ParrisIslandStrategy** | v0.1.0 | Advanced adaptive strategy with additional parameters for position sizing, pool liquidity requirements, oracle selection, and dynamic range adjustments. |
+| **ParrisIslandStrategy** | v0.4.0 | Advanced adaptive strategy with 26 parameters covering position sizing, pool liquidity requirements, oracle selection, and dynamic range adjustments. |
 
 ## Features
 
@@ -73,7 +89,7 @@ F.U.M. combines a Next.js frontend with Solidity smart contracts to provide:
 - Assign/unassign LP positions to vaults
 
 ### Position Management
-- View all Uniswap V3 positions across connected wallet and vaults
+- View positions across all supported platforms (V3, V4, Trader Joe) for both wallet and vaults
 - Add/remove liquidity from positions
 - Collect accumulated fees
 - Close positions completely
@@ -83,7 +99,7 @@ F.U.M. combines a Next.js frontend with Solidity smart contracts to provide:
 - Customize individual parameters:
   - **Range Parameters** - Target range width, rebalance thresholds
   - **Fee Settings** - Reinvestment triggers and ratios
-  - **Risk Management** - Max slippage, emergency exit triggers, utilization limits
+  - **Risk Management** - Max slippage, emergency exit triggers
 
 ### Real-Time Updates
 - SSE connection to automation service
@@ -106,37 +122,28 @@ F.U.M. combines a Next.js frontend with Solidity smart contracts to provide:
 - npm or yarn
 - MetaMask or compatible EVM wallet
 
-### Repository Structure
+### Monorepo Layout
 
-The F.U.M. ecosystem requires repositories to be cloned as siblings:
+`fum` is one subproject in the `fum_project` monorepo. Sibling subprojects:
 
 ```
-code/
-├── fum/              # This repository (Frontend + Smart Contracts)
-├── fum_library/      # Shared utilities (required)
-└── fum_automation/   # Automation service (optional, for full testing)
+fum_project/
+├── fum/              # This subproject (Frontend + Smart Contracts)
+├── fum_library/      # Shared utilities (adapters, ABIs, helpers)
+├── fum_automation/   # Automation service (position monitoring & rebalancing)
+└── fum_testing/      # Hardhat contract test environment
 ```
 
 ### fum_library Setup
 
-For local development, build and pack the library:
+fum_library is consumed as a local tarball (`file:../fum_library/fum_library-*.tgz`) rather than via `npm link`. After making changes in fum_library, rebuild and reinstall the tarball into sibling projects:
 
 ```bash
-# Clone fum_library if not already present
-cd ..
-git clone https://github.com/derrek-b/fum_library.git
-
-# Build and pack the library
 cd fum_library
-npm install
-npm run build && npm pack
-
-# Return to fum and install
-cd ../fum
-npm install
+npm run pack   # builds, packs, and installs into fum and fum_automation
 ```
 
-> **Note:** Run `npm run pack` in fum_library whenever you make library changes to reinstall the updated tarball in fum and fum_automation.
+> **Never use `npm link`** — it causes module initialization issues. Always use `npm run pack`.
 
 ### Installation
 
@@ -162,9 +169,11 @@ NEXT_PUBLIC_DEMO_CHAIN_ID=1337
 # Automation service SSE endpoint
 NEXT_PUBLIC_SSE_URL=http://your-automation-service:port/events
 
-# For local testing only - Alchemy API key for Arbitrum RPC
-# The UniswapV3Adapter needs real Arbitrum for AlphaRouter swap routing
-# Not needed for production (uses wallet provider directly)
+# CoinGecko API key for token price feeds (optional but strongly recommended)
+NEXT_PUBLIC_COINGECKO_API_KEY=your_coingecko_api_key
+
+# Alchemy API key for dedicated RPC provider and AlphaRouter swap routing
+# Needed for both production (read provider) and local testing (forked Arbitrum state)
 NEXT_PUBLIC_ALCHEMY_API_KEY=your_alchemy_api_key
 ```
 
@@ -183,47 +192,53 @@ For full application testing setup, see [TESTING.md](TESTING.md).
 
 ## Available Scripts
 
+Core scripts:
+
 | Script | Description |
 |--------|-------------|
 | `npm run dev` | Start Next.js development server |
 | `npm run build` | Build production bundle |
 | `npm run start` | Start production server |
 | `npm run lint` | Run ESLint |
-| `npm run contracts:sync` | Sync contracts to fum_library, fum_automation and fum_testing |
-| `npm run contracts:test` | Sync contracts to & run Hardhat contract tests in fum_testing |
+| `npm run contracts:sync` | Sync contracts to fum_library, fum_automation, and fum_testing |
+| `npm run contracts:test` | Sync contracts + run Hardhat contract tests in fum_testing |
+| `npm run contracts:test:coverage` | Sync contracts + run Hardhat coverage in fum_testing |
+| `npm run hardhat` | Start Arbitrum fork (chain 1337, port 8545) + deploy contracts |
+| `npm run hardhat:av` | Start Avalanche fork (chain 1338, port 8546) + deploy contracts |
+
+Local test-data seeding, fee generation, and price manipulation scripts are documented in [TESTING.md](TESTING.md).
 
 ## Project Structure
 
 ```
 fum/
-├── contracts/              # Solidity smart contracts
+├── contracts/                   # Solidity smart contracts
 │   ├── PositionVault.sol
 │   ├── VaultFactory.sol
+│   ├── StrategyBase.sol
 │   ├── BabyStepsStrategy.sol
-│   └── ParrisIslandStrategy.sol
+│   ├── ParrisIslandStrategy.sol
+│   ├── TJPositionManager.sol
+│   ├── TJPositionProxy.sol
+│   ├── interfaces/              # ISwapValidator, ILiquidityValidator, IIncentiveValidator, ...
+│   └── validators/              # UniversalRouter, V3/V4, TJ, Merkl validators
 ├── src/
-│   ├── pages/              # Next.js pages
-│   │   ├── index.js        # Landing page
-│   │   ├── vaults.js       # Vault management
-│   │   ├── positions.js    # Position management
-│   │   ├── demo.js         # Demo showcase
-│   │   ├── vault/[address].js
-│   │   └── position/[id].js
-│   ├── components/
-│   │   ├── common/         # Shared components (Navbar, Wallet, etc.)
-│   │   ├── vaults/         # Vault-related components
-│   │   ├── positions/      # Position-related components
-│   │   └── transactions/   # Transaction history components
-│   ├── redux/              # Redux store and slices
-│   ├── contexts/           # React context providers
-│   ├── hooks/              # Custom React hooks
-│   ├── utils/              # Utility functions
-│   └── styles/             # Global styles
-├── scripts/                # Deployment and utility scripts
-├── test/                   # Test scripts
-├── deployments/            # Deployment configurations
-└── public/                 # Static assets
+│   ├── pages/                   # Next.js Pages Router
+│   ├── components/              # common / vaults / positions / transactions
+│   ├── redux/                   # Store + slices (wallet, vaults, positions, strategies, platforms, automation, updates)
+│   ├── context/                 # ToastContext
+│   ├── contexts/                # ProviderContext (ethers providers)
+│   ├── hooks/                   # useProviders, useAutomationEvents, useModalData, ...
+│   ├── utils/                   # vaultsHelpers, sseEventHandlers, strategyIcons
+│   └── styles/                  # Global CSS + modules
+├── scripts/                     # Contract sync + deployment scripts
+├── test/scripts/                # Local dev helpers (hardhat, seed, generate-fees, manipulate-price)
+├── bytecode/                    # Extracted contract bytecode (populated by sync)
+├── deployments/                 # Deployment address records (`{chainId}-latest.json`)
+└── public/                      # Static assets
 ```
+
+See `docs/architecture/` for per-subsystem deep dives (contract system, validator pattern, frontend, scripts pipeline).
 
 ## Tech Stack
 
@@ -240,25 +255,21 @@ fum/
 - **Hardhat** - Development framework, testing, and local blockchain
 
 ### External Dependencies
-- **fum_library** - Shared adapters, ABIs, and utilities
-- **Uniswap V3 SDK** - Position calculations
-- **CoinGecko API** - Token pricing (via fum_library)
+- **fum_library** — Shared adapters (V3/V4/TJ), ABIs, blockchain utilities, price feeds
+- **Uniswap V3 SDK / V4 SDK** — Position calculations
+- **CoinGecko API** — Token pricing (via fum_library)
 
-## Related Repositories
+## Sibling Subprojects
 
-| Repository | Description |
+| Subproject | Description |
 |------------|-------------|
-| [fum_library](https://github.com/derrek-b/fum_library) | Shared library with Uniswap V3 adapter, ABIs, and blockchain utilities |
-| [fum_automation](https://github.com/derrek-b/fum_automation) | Automation service for position monitoring and rebalancing |
-| [fum_testing](https://github.com/derrek-b/fum_testing) | Isolated Hardhat environment for contract testing |
+| `fum_library` | Shared library with V3/V4/TJ adapters, ABIs, price helpers, chain configs |
+| `fum_automation` | Automation service for position monitoring, rebalancing, and fee collection |
+| `fum_testing` | Isolated Hardhat environment for contract unit tests |
 
 ## Version History
 
-- **v0.9.0** - PositionVault v1.2.0 with ETH wrapping functions (wrapETH, unwrapETH)
-- **v0.8.0** - PositionVault empty batch validation
-- **v0.7.0** - Dual provider architecture (dedicated RPC + wallet)
-- **v0.6.0** - Demo page, transaction history, APY calculations
-- **v0.5.0** - Security refactor
+See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
 ## License
 
