@@ -58,7 +58,7 @@ Major work since 2025-12-18 spanning multi-platform support, executor funding fl
 
 ### Scripts & Tooling
 
-- Seed scripts combined per-platform (`seed.js`, `seed-v4.js`, `seed-avalanche.js`) with opt-in `ENABLE_STRATEGY`, `ENABLE_AUTOMATION`, `ENABLE_POSITION` flags. Old `create-test-vault.js` + `seed.js` two-step flow deprecated (files retained for manual invocation).
+- Seed scripts combined per-platform (`seed.js`, `seed-v4.js`, `seed-avalanche.js`) with opt-in `ENABLE_STRATEGY` and `ENABLE_AUTOMATION` flags. Old `create-test-vault.js` + `seed.js` two-step flow deprecated (files retained for manual invocation).
 - V3/V4/TJ price-manipulation and fee-generation scripts rewritten for multi-platform support. Uses `hardhat_setStorageAt` to mint tokens directly rather than pool swaps.
 - `npm run hardhat:av` spins up an Avalanche fork (chain 1338, port 8546) with TJ contracts deployed.
 - API query filtering: `/blacklist` and `/funding-required` endpoints accept `?vaults=addr1,addr2` to scope to a user's vaults.
