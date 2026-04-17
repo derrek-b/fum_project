@@ -48,7 +48,7 @@ The backup destination is `/mnt/f/backups/fum_project/`.
 Run rsync with these options:
 
 ```bash
-rsync -av --delete \
+rsync -rlv --delete --no-perms --no-owner --no-group --no-times \
   --exclude='node_modules/' \
   --exclude='.next/' \
   --exclude='dist/' \
@@ -61,9 +61,11 @@ rsync -av --delete \
 ```
 
 **Flags explained:**
-- `-a` — archive mode (preserves permissions, timestamps, symlinks)
+- `-r` — recursive
+- `-l` — preserve symlinks
 - `-v` — verbose (show files being transferred)
 - `--delete` — remove files from destination that no longer exist in source (keeps it a true mirror)
+- `--no-perms --no-owner --no-group --no-times` — skip Unix metadata that NTFS (via drvfs) doesn't support. Without these, rsync throws "Operation not permitted" errors trying to `chmod`/`chown`/`utime` destination files. Do NOT use `-a` on this destination — it bundles `-pogt` and will fail.
 
 **Important:** The trailing `/` on the source path is required — it syncs the contents of fum_project into the destination, not fum_project itself.
 

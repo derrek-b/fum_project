@@ -4,7 +4,15 @@ You are committing code changes and ensuring the project's documentation stays i
 
 ## Scope
 
-This skill maintains **code-coupled documentation**: architecture docs (`docs/architecture/`), API references (`docs/api-reference/`), and CLAUDE.md files. It detects staleness by comparing committed source files against `<!-- Source: ... -->` comments in each doc.
+This skill maintains **code-coupled documentation**:
+- Architecture docs (`docs/architecture/`) and API references (`docs/api-reference/`) — detected via `<!-- Source: ... -->` comments
+- CLAUDE.md files — detected via source comments plus structure/command heuristics
+- README.md and TESTING.md files — detected via heuristics (no source comments): package.json scripts drift, test-infra changes, top-level structure changes
+
+**Explicitly NOT handled by this skill** (deferred to `/update-brain`):
+- CHANGELOG.md — session-level summarization is the right granularity, not per-commit
+- docs/decisions/ — decision reversals are session-level judgment calls
+- docs/platform-knowledge/ — triggered by "I learned something about this DEX", not any specific file change
 
 **Session-level knowledge** (decisions, conventions, gotchas, workflow changes) is captured by the `/update-brain` skill, which should be run at the end of a working session.
 
@@ -104,9 +112,39 @@ Each architecture doc, API reference doc, and CLAUDE.md has a `<!-- Source: ... 
 **Also check for:**
 - **New files** not covered by any doc's source mapping — flag these as "new file not covered by docs"
 - **CLAUDE.md cascade** — if any architecture doc in a subproject was modified (either in this commit or about to be in the doc update), check that subproject's CLAUDE.md for stale pointers
-- **package.json changes** — if package.json changed, check CLAUDE.md for stale command references
 
-**6c. If no docs need updating:**
+**6c. Heuristic checks for non-source-mapped docs (README.md, TESTING.md, CLAUDE.md):**
+
+These docs don't have `<!-- Source: ... -->` comments because their scope is whole-project, so staleness is inferred from change triggers rather than file overlap. For each subproject in the commit scope, run the three heuristics below.
+
+**Heuristic A — package.json scripts drift → README / TESTING / CLAUDE:**
+
+If the commit touched a `package.json`:
+1. `git show HEAD~1:path/to/package.json` for the before-version (note: after a fresh commit, HEAD~1 is the pre-commit state)
+2. Parse the `scripts` block from before and after. Compute three sets:
+   - **Added**: names in `after` not in `before`
+   - **Removed**: names in `before` not in `after`
+   - **Renamed**: removed+added pairs where the command bodies match (same command, different name) — report as a rename rather than two separate changes
+3. For each changed script name, grep the subproject's `README.md`, `TESTING.md`, `CLAUDE.md` (and the root `CLAUDE.md` for cross-cutting references) for occurrences. To reduce false positives, match on the **invocation pattern** (`npm run <name>`, `yarn <name>`, `` ` <name> ``) rather than the bare name. Use word boundaries so `dev` doesn't match `develop`.
+4. If a changed script name appears in a doc → flag as `[UPDATE]` with the specific line reference and the nature of the change ("removed", "added", "renamed from X"). **When reporting matches**: include the total hit count and cite at most the first 3 line numbers (e.g. `6 references in fum/CLAUDE.md — lines 28, 35, 62 (+3 more)`) so a high-frequency rename doesn't produce a wall of output. The edit pass reads the whole file anyway, so full coverage happens at edit time, not flag time.
+5. If the grep returns zero hits for an added script, flag as `[MAYBE]` suggesting the doc might benefit from mentioning the new command — low confidence, user judgment
+
+**Heuristic B — Test infra change → TESTING.md:**
+
+If the commit added or removed files matching any of these patterns (modifications alone do not trigger):
+- `test/**` (new test files or removed test files)
+- `test/setup/**`, `test/helpers/**` (new or removed setup/helper files)
+- `vitest.config*`, `hardhat.config*` (any change)
+
+→ flag the subproject's `TESTING.md` as `[MAYBE]` (not `[UPDATE]` — TESTING.md often doesn't need edits for individual test additions, but does need edits when whole suites or setup patterns appear/disappear). Include a brief summary of which files/dirs appeared or disappeared so the user can decide.
+
+**Heuristic C — Top-level structure change → README.md:**
+
+If the commit added or removed a directory at depth 1–2 under `src/`, `contracts/`, `scripts/`, or the subproject root:
+1. Check if the subproject's `README.md` contains a section with a heading like "Project Structure", "Module Structure", "Repo Layout", or an ASCII file tree
+2. If yes → flag as `[UPDATE]` with the specific directory change ("added `src/strategies/parrisIsland/`", "removed `scripts/legacy/`")
+
+**6d. If no docs need updating:**
 Say "No doc updates needed" and stop. The commit is done.
 
 ## Step 7: Propose Doc Updates
@@ -120,18 +158,32 @@ For each doc that needs review:
    - **Yes:** behavioral change, new/removed function, changed parameters, changed data shape, new pattern
    - **No:** formatting, comments, variable renames, internal refactoring that doesn't change the documented interface
 
-Present a numbered list of proposed updates:
+Present a numbered list of proposed updates. Classifications:
+- **`[UPDATE]`** — doc is definitely stale, change is clear
+- **`[MAYBE]`** — heuristic suggests the doc could use review, but it's a judgment call (typical for TESTING.md on test additions, or README.md command additions with no existing command reference)
+- **`[SKIP]`** — change is internal/cosmetic, no doc update needed
+- **`[FLAG]`** — new file or feature not covered anywhere, consider adding a doc
+
 ```
 1. [UPDATE] fum/docs/architecture/scripts-pipeline.md
    Section "VaultFactory Constructor": update to show 2 params instead of 4
 
 2. [UPDATE] fum/CLAUDE.md
-   Section "Commands": add new `npm run lint` command from package.json
+   Section "Commands": `seed-localhost:av:pos` was removed from package.json,
+   1 reference in fum/CLAUDE.md — line 35
 
-3. [SKIP] fum/docs/architecture/frontend.md
+3. [UPDATE] fum/README.md
+   "Project Structure" tree: added `src/strategies/parrisIsland/` directory
+   not listed
+
+4. [MAYBE] fum_automation/TESTING.md
+   New test files under test/workflow/newplatform/ — TESTING.md describes
+   workflow test structure, may want to mention the new suite
+
+5. [SKIP] fum/docs/architecture/frontend.md
    Changes to src/redux/vaultsSlice.js were internal refactoring only — no doc update needed
 
-4. [FLAG] fum/contracts/validators/NewValidator.sol
+6. [FLAG] fum/contracts/validators/NewValidator.sol
    New file not covered by any doc — consider adding to validator-pattern.md
 ```
 

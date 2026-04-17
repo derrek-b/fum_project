@@ -4,9 +4,16 @@ You are updating the "second brain" for the FUM project. Your job is to review w
 
 ## Scope
 
-This skill captures **session-level knowledge**: decisions made, conventions established, gotchas discovered, workflow changes, and TODO items. It updates CLAUDE.md files, decision docs, and platform knowledge docs.
+This skill captures **session-level knowledge**: decisions made, conventions established, gotchas discovered, workflow changes, user-facing/architectural change history, and TODO items. It updates:
+
+- CLAUDE.md files (root + per-subproject)
+- Decision docs (`docs/decisions/`)
+- Platform knowledge docs (`docs/platform-knowledge/`)
+- CHANGELOG.md files — `fum/CHANGELOG.md`, `fum_library/CHANGELOG.md`, `fum_automation/CHANGELOG.md` (fum_testing has no CHANGELOG)
 
 **Architecture docs and API references** (`docs/architecture/`, `docs/api-reference/`) are maintained by the `/commit` skill via source mapping. Do not propose detailed changes to those here. However, if you notice obvious staleness in architecture docs from uncommitted work, flag it so the user can address it at commit time.
+
+**README.md and TESTING.md** are also maintained by `/commit` via heuristic checks (package.json scripts drift, test infra change, top-level structure change). Don't duplicate that work here.
 
 ## Step 1: Gather Context
 
@@ -43,6 +50,36 @@ Files to check:
 - Did we learn something about how a protocol actually behaves vs. what the docs say?
 - Did we fix a bug caused by a platform-specific misunderstanding?
 
+### CHANGELOG entries (`fum/CHANGELOG.md`, `fum_library/CHANGELOG.md`, `fum_automation/CHANGELOG.md`)
+
+Session-level changelog summarization is the right granularity, not per-commit. Use the session's commit history (`git log --oneline` plus per-commit diffs if needed) to group related commits into coherent changelog entries.
+
+**What belongs in CHANGELOG:**
+- User-facing features added, removed, or changed behavior
+- Breaking API or contract changes
+- Significant bug fixes (not small typos or internal refactors)
+- Architectural changes visible to consumers of the package
+- Dependency bumps with observable impact (major version, breaking change, security fix)
+- New or retired commands and scripts
+
+**What does NOT belong in CHANGELOG:**
+- Pure internal refactors with no behavioral change
+- Documentation updates (unless creating a new public doc)
+- Build artifact refreshes (deployment addresses, tarball hashes, regenerated ABIs)
+- Test-only changes (unless a whole test suite or pattern was added/removed)
+- Internal renames or comment edits
+- Chore commits (`.gitignore` housekeeping, tooling config)
+
+**Format — match each file's existing convention:**
+
+Each CHANGELOG has its own style — match what's already there rather than imposing a uniform shape:
+
+- **`fum/CHANGELOG.md`** — `[Unreleased]` at top, then H3 by theme/subsystem (e.g. "Multi-Platform Support", "Frontend — Data Flow"), H4 for sub-areas. No "Added/Changed/Fixed" buckets.
+- **`fum_library/CHANGELOG.md`** — `[Unreleased]` at top, then H3 using Keep-a-Changelog buckets (Added / Changed / Fixed / Removed / Documentation), H4 by topic within each bucket.
+- **`fum_automation/CHANGELOG.md`** — No `[Unreleased]` section; the most recent versioned section (e.g. `[1.1.0] - 2026-04`) is rolling until cut. H3 by theme, H4 for sub-areas.
+
+**Ownership rule:** only log an entry in a given CHANGELOG when the change actually affects that package's consumers or behavior. A contract change in `fum/` that's surfaced via ABIs into `fum_library/` typically belongs in both CHANGELOGs; a pure `fum_automation/` feature that doesn't alter any exported behavior belongs only in `fum_automation/`.
+
 ## Step 3: Propose Changes
 
 Present a numbered list of proposed updates. For each one, show:
@@ -60,6 +97,18 @@ Format:
 
 3. [UPDATE] docs/platform-knowledge/trader-joe-v2-2.md
    Add the bin reservation gotcha we discovered during fee testing
+
+4. [UPDATE] fum/CHANGELOG.md
+   [Unreleased] → Frontend — Automation UX: add bullet for "Warn on missing
+   pools when saving strategy config" (from commit d44e8768)
+
+5. [UPDATE] fum_library/CHANGELOG.md
+   [Unreleased] → Added → Adapter interface: document the selectBestPool
+   return shape change so consumers know what to grep for
+
+6. [SKIP] fum_automation/CHANGELOG.md
+   No fum_automation-facing changes this session — all work was in fum and
+   fum_library. Not every CHANGELOG needs an entry every session.
 ```
 
 If nothing meaningful needs to be captured, say so. Don't force updates for trivial changes.
