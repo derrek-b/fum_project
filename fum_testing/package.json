@@ -1,6 +1,6 @@
 {
   "name": "fum_testing",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "author": "Derrek Brack & Claude Code",
   "license": "SEE LICENSE IN LICENSE",
   "description": "Hardhat environment for testing of contracts from the fum project",

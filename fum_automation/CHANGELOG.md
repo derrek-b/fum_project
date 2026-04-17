@@ -1,6 +1,6 @@
 # F.U.M. Project Changelog
 
-## [1.1.0] - 2026-04
+## [2.0.0] - 2026-04-17
 
 ### Multi-Platform Support
 
@@ -34,7 +34,7 @@
 - **ADDED**: Gas profiling tests for all three platforms
 
 **Status**: ✅ Production Ready
-**Breaking Changes**: Requires fum_library v1.2.1+ with multi-platform adapter support
+**Breaking Changes**: Requires fum_library v2.0.0+ with multi-platform adapter support
 **Dependency**: Node.js >=22.0.0
 
 ---

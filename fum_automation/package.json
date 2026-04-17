@@ -1,6 +1,6 @@
 {
   "name": "fum_automation",
-  "version": "1.0.4",
+  "version": "2.0.0",
   "author": "Derrek Brack & Claude Code",
   "license": "SEE LICENSE IN LICENSE.md",
   "description": "DeFi liquidity position management automation",
@@ -41,7 +41,7 @@
     "@uniswap/v3-sdk": "3.29.1",
     "axios": "^1.9.0",
     "ethers": "^5.7.2",
-    "fum_library": "file:../fum_library/fum_library-1.2.1.tgz",
+    "fum_library": "file:../fum_library/fum_library-2.0.0.tgz",
     "jsbi": "^3.2.5",
     "tslib": "^2.8.1"
   },

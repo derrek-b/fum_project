@@ -27,7 +27,7 @@ fum_library ──(tarball install)──> fum_automation
 fum ──(contract sync scripts)──> fum_testing, fum_automation, fum_library
 ```
 
-- `fum` and `fum_automation` consume `fum_library` via `file:../fum_library/fum_library-1.2.1.tgz`
+- `fum` and `fum_automation` consume `fum_library` via `file:../fum_library/fum_library-2.0.0.tgz`
 - After changing fum_library: `cd fum_library && npm run pack` (builds, packs, and installs into siblings)
 - **Never use npm link** to share fum_library — it causes initialization issues. Always use `npm run pack`.
 - Contract changes in `fum/contracts/` are synced with: `cd fum && npm run contracts:sync`
