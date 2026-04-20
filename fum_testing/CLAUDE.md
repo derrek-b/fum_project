@@ -64,8 +64,8 @@ Detailed docs in `docs/architecture/`:
 ## Key Details
 
 - **Solidity**: ^0.8.28
-- **Hardhat config**: Forks Arbitrum mainnet via Alchemy (`NEXT_PUBLIC_ALCHEMY_API_KEY` in .env), local chainId `1337`
-- **Setup**: Copy `.env.example` to `.env` and set `NEXT_PUBLIC_ALCHEMY_API_KEY` before running tests
+- **Hardhat config**: Local network only (chainId `1337`), no forking — external protocols are simulated via mocks
+- **Setup**: `npm install` — no environment variables required
 - **Interfaces**: `contracts/interfaces/` (6 files: `IIncentiveValidator`, `ILBPair`, `ILBRouter`, `ILiquidityValidator`, `ISwapValidator`, `IVaultFactory`) — also synced from `fum/contracts/`
 - **Dependencies**: OpenZeppelin v5, Uniswap V3 core/periphery, Hardhat Toolbox
 - **No dependency on fum_library** — this project is fully standalone

@@ -464,7 +464,7 @@ const vaultAddress = factory.interface.parseLog(vaultCreatedEvent).args[1];
 
 2. **Token sorting for Trader Joe** — LB pairs require `tokenX < tokenY` by address. Always sort before creating a MockLBPair or encoding TJ calldata.
 
-3. **Deadline source matters** — Use `(await ethers.provider.getBlock("latest")).timestamp + 3600` for block-relative deadlines. Wall-clock `Date.now()` can drift from the forked block timestamp.
+3. **Deadline source matters** — Use `(await ethers.provider.getBlock("latest")).timestamp + 3600` for block-relative deadlines. Wall-clock `Date.now()` can drift from the Hardhat block timestamp.
 
 4. **Validators without a protocol mock test calldata only** — The V4 position manager and Merkl Distributor have no mock contracts. `UniswapV4PositionValidator.test.js` and `MerklIncentiveValidator.test.js` use signer addresses as stand-ins for tokens, hooks, and recipients, and only exercise calldata encoding/parsing.
 
