@@ -215,4 +215,10 @@ describe("TJPositionValidator", function() {
         .to.be.revertedWith("TJPositionValidator: not yet implemented");
     });
   });
+
+  describe("Version", function() {
+    it("should return the correct version", async function() {
+      expect(await validator.VERSION()).to.equal("2.0.0");
+    });
+  });
 });

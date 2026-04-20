@@ -403,7 +403,7 @@ describe("ParrisIslandStrategy", function () {
 
   describe("Version", function () {
     it("Should return correct version", async function () {
-      const version = await strategy.getVersion();
+      const version = await strategy.VERSION();
       expect(version).to.equal("0.4.0");
     });
   });

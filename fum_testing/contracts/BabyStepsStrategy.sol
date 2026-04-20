@@ -306,11 +306,4 @@ contract BabyStepsStrategy is StrategyBase {
 
     // ==================== Admin Functions ====================
 
-    /**
-     * @dev Get the contract version
-     * @return Version string
-     */
-    function getVersion() external pure returns (string memory) {
-        return VERSION;
-    }
 }

@@ -282,7 +282,7 @@ describe("BabyStepsStrategy", function () {
 
   describe("Version", function () {
     it("Should return correct version", async function () {
-      const version = await strategy.getVersion();
+      const version = await strategy.VERSION();
       expect(version).to.equal("2.0.0");
     });
   });

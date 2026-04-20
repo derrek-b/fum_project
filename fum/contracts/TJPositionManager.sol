@@ -42,6 +42,9 @@ interface ITJPositionProxy {
  *            7. Emit PositionCreated event
  */
 contract TJPositionManager is ReentrancyGuard {
+    // Version information
+    string public constant VERSION = "2.0.0";
+
     using SafeERC20 for IERC20;
 
     struct Position {

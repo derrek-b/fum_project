@@ -16,6 +16,9 @@ import "../interfaces/ILiquidityValidator.sol";
  * - burn (0x42966c68): No recipient validation (just removes empty NFT)
  */
 contract UniswapV3PositionValidator is ILiquidityValidator {
+    // Version information
+    string public constant VERSION = "2.0.0";
+
     // Function selectors for NonfungiblePositionManager
     bytes4 constant internal MINT_SELECTOR = 0x88316456;
     bytes4 constant internal INCREASE_LIQUIDITY_SELECTOR = 0x219f5d17;

@@ -14,6 +14,9 @@ import "../interfaces/ILiquidityValidator.sol";
  *        itself via require(pos.owner == msg.sender), using stored on-chain state.
  */
 contract TJPositionValidator is ILiquidityValidator {
+    // Version information
+    string public constant VERSION = "2.0.0";
+
     // createPosition(address,address,uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)
     bytes4 constant internal CREATE_POSITION_SELECTOR = bytes4(keccak256(
         "createPosition(address,address,uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)"

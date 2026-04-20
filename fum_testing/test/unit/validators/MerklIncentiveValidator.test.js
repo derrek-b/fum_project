@@ -109,4 +109,10 @@ describe("MerklIncentiveValidator", function() {
         .to.be.revertedWith("MerklIncentiveValidator: claim user must be vault");
     });
   });
+
+  describe("Version", function() {
+    it("should return the correct version", async function() {
+      expect(await validator.VERSION()).to.equal("2.0.0");
+    });
+  });
 });

@@ -537,4 +537,10 @@ describe("UniversalRouterValidator", function() {
       await expect(validator.validateSwap(calldata, vaultAddress)).to.not.be.reverted;
     });
   });
+
+  describe("Version", function() {
+    it("should return the correct version", async function() {
+      expect(await validator.VERSION()).to.equal("2.0.0");
+    });
+  });
 });

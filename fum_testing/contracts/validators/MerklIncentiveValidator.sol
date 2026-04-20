@@ -20,6 +20,9 @@ import "../interfaces/IIncentiveValidator.sol";
  * and safe to repeat.
  */
 contract MerklIncentiveValidator is IIncentiveValidator {
+    // Version information
+    string public constant VERSION = "2.0.0";
+
     // Function selector for claim(address,address[],uint256[],bytes32[][])
     bytes4 constant internal CLAIM_SELECTOR = 0xa0165082;
 

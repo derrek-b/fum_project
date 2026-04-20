@@ -25,6 +25,8 @@ import "../interfaces/ISwapValidator.sol";
  *      - swapNATIVEForExactTokens(uint256,(uint256[],uint8[],address[]),address,uint256)
  */
 contract TJSwapValidator is ISwapValidator {
+    // Version information
+    string public constant VERSION = "2.0.0";
 
     // 5-param group: swapExactTokensForTokens(uint256,uint256,(uint256[],uint8[],address[]),address,uint256)
     bytes4 constant internal SWAP_EXACT_TOKENS_FOR_TOKENS = bytes4(keccak256(

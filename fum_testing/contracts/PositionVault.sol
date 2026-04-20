@@ -25,6 +25,9 @@ interface IWETH {
  *      Validates transactions via factory's centralized validator registry.
  */
 contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
+    // Version information
+    string public constant VERSION = "2.0.0";
+
     using SafeERC20 for IERC20;
     using ECDSA for bytes32;
 

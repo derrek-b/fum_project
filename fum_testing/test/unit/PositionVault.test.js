@@ -569,7 +569,7 @@ describe("PositionVault - 2.0.0", function() {
   // Test for contract version
   describe("Contract Version", function() {
     it("should return the correct version", async function() {
-      expect(await vault.getVersion()).to.equal("2.0.0");
+      expect(await vault.VERSION()).to.equal("2.0.0");
     });
   });
 

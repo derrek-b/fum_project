@@ -15,6 +15,9 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  *      (e.g., Uniswap V4) only requires updating the factory once.
  */
 contract VaultFactory is Ownable {
+    // Version information
+    string public constant VERSION = "2.0.0";
+
     // Permit2 contract address for this chain (passed to new vaults)
     address public immutable permit2;
 

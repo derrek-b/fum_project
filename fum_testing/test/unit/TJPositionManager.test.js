@@ -2091,4 +2091,10 @@ describe("TJPositionManager", function() {
       expect(ownerPositions[0]).to.equal(1);
     });
   });
+
+  describe("Version", function() {
+    it("should return the correct version", async function() {
+      expect(await positionManager.VERSION()).to.equal("2.0.0");
+    });
+  });
 });

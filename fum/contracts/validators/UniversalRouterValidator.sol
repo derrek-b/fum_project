@@ -30,6 +30,9 @@ import "../interfaces/ISwapValidator.sol";
  * then SWEEP sends the final output to the vault.
  */
 contract UniversalRouterValidator is ISwapValidator {
+    // Version information
+    string public constant VERSION = "2.0.0";
+
     // Universal Router special address for "keep tokens in router" (used in multi-hop swaps)
     // See: https://docs.uniswap.org/contracts/universal-router/technical-reference
     address constant internal ADDRESS_THIS = address(2);

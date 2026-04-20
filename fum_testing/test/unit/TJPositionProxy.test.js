@@ -96,4 +96,10 @@ describe("TJPositionProxy", function() {
       expect(supportsERC165).to.equal(true);
     });
   });
+
+  describe("Version", function() {
+    it("should return the correct version", async function() {
+      expect(await proxy.VERSION()).to.equal("2.0.0");
+    });
+  });
 });

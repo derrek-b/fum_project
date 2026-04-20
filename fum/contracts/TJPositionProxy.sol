@@ -11,6 +11,9 @@ import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
  *      of TJPositionManager.
  */
 contract TJPositionProxy is ERC1155Holder {
+    // Version information
+    string public constant VERSION = "2.0.0";
+
     address public manager;
     bool private initialized;
 

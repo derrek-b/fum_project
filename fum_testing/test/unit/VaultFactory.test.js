@@ -671,7 +671,7 @@ describe("VaultFactory - 2.0.0", function() {
 
   describe("Version", function() {
     it("should return the correct version", async function() {
-      expect(await factory.getVersion()).to.equal("2.0.0");
+      expect(await factory.VERSION()).to.equal("2.0.0");
     });
   });
 });

@@ -796,13 +796,4 @@ contract ParrisIslandStrategy is StrategyBase {
         emit ParameterUpdated(msg.sender, "platformParameters");
     }
 
-    // ==================== Admin Functions ====================
-
-    /**
-     * @dev Get the contract version
-     * @return Version string
-     */
-    function getVersion() external pure returns (string memory) {
-        return VERSION;
-    }
 }
