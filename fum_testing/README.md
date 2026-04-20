@@ -43,24 +43,14 @@ This testing suite validates all contracts synced from `fum/contracts/`:
 
 - Node.js 22+
 - npm
-- An Alchemy API key (free tier works)
 
 ## Setup
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
+```bash
+npm install
+```
 
-2. Create environment file:
-   ```bash
-   cp .env.example .env
-   ```
-
-3. Add your Alchemy API key to `.env`:
-   ```
-   NEXT_PUBLIC_ALCHEMY_API_KEY=your_key_here
-   ```
+No environment variables required — tests are fully self-contained.
 
 ## Contracts Are Synced — Do Not Edit Here
 
@@ -137,7 +127,9 @@ Eight mock contracts in `contracts/` simulate external protocols. See `docs/arch
 
 ## Network Configuration
 
-Tests run on a local Hardhat network (chainId `1337`) that forks Arbitrum mainnet. This allows testing against real protocol addresses (Uniswap, Permit2) while maintaining isolated test state.
+Tests run on a local Hardhat network (chainId `1337`), fully self-contained. External protocols (Uniswap, Trader Joe, Permit2, WETH) are simulated by the mock contracts above rather than accessed via a mainnet fork — tests do not interact with any real protocol state.
+
+> The Hardhat config currently enables Arbitrum forking, but no test uses it. The forked state is effectively dead weight and could be removed.
 
 ## Related Projects
 
