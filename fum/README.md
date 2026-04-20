@@ -273,7 +273,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
 ## License
 
-Copyright (c) 2025 Derrek Brack and Rabid Husky Designs. All rights reserved.
+Copyright (c) 2025 Derrek Brack. All rights reserved.
 
 This software is proprietary and provided for portfolio demonstration purposes only. See [LICENSE.md](LICENSE.md) for details.
 

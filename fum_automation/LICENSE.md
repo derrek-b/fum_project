@@ -1,9 +1,9 @@
-Copyright (c) 2025 Derrek Brack and Rabid Husky Designs
+Copyright (c) 2025 Derrek Brack
 
 All rights reserved.
 
 This software and associated documentation files (the "Software") are the
-proprietary property of The D-Nice and Rabid Husky Designs. The Software
+proprietary property of Derrek Brack. The Software
 may not be used, copied, modified, merged, published, distributed,
 sublicensed, or sold without explicit written permission from the copyright
 holder.
