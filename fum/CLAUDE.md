@@ -96,6 +96,8 @@ Detailed docs in `docs/architecture/`:
 
 Edit contracts in `contracts/`, run `npm run contracts:sync` to distribute, `npm run contracts:test` to test. See [scripts-pipeline.md](docs/architecture/scripts-pipeline.md) for the full 6-step pipeline and cross-project effects.
 
+**Coverage reports lie.** `npm run contracts:test:coverage` shows 100% line/function coverage but ~93% branch coverage. The remaining ~48 uncovered branches break down as ~42 tool artifacts (viaIR + solidity-coverage 0.8.16 — tests exist, don't register) and 6 NONREENTRANT_GUARD branches in TJPositionManager (intentionally untested — OpenZeppelin battle-tested). Zero genuine uncovered code. Read [fum_testing/docs/architecture/coverage-quirks.md](../fum_testing/docs/architecture/coverage-quirks.md) before chasing any coverage gap.
+
 ## Validator Pattern
 
 Every swap/liquidity operation passes through a validator that parses calldata and enforces recipient restrictions. Validators are registered in VaultFactory and called automatically. See [validator-pattern.md](docs/architecture/validator-pattern.md) for calldata offset calculations, selector hex values, and security invariants.

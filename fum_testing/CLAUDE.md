@@ -54,12 +54,13 @@ test/unit/
 
 ## Mock Contracts
 
-Tests use 8 mock contracts in `contracts/` (prefixed `Mock*`) to simulate external protocols: an ERC20 token, WETH, Uniswap V3 position NFTs, Universal Router, Trader Joe LB pair/router, and Permit2. Most mocks expose `setShouldFail()` for error path testing and `last*` variables for call verification.
+Tests use 8 mock contracts in `contracts/` (prefixed `Mock*`) to simulate external protocols: an ERC20 token, WETH, Uniswap V3 position NFTs, Universal Router, Trader Joe LB pair/router, and Permit2. Most mocks expose `setShouldFail()` for error path testing and `last*` variables for call verification. Plus one test actor (`MaliciousOwner.sol`) that rejects ETH to exercise vault ETH-transfer failure paths.
 
 ## Architecture
 
 Detailed docs in `docs/architecture/`:
 - **testing-patterns.md** — Mock contract APIs, deployment sequences, calldata encoding helpers, testing gotchas
+- **coverage-quirks.md** — Why `npx hardhat coverage` reports false-negative branch gaps (viaIR + solidity-coverage 0.8.16 interaction). After 2026-04-20 round-2 closures, 100% line/function coverage with 48 remaining uncovered branches (~42 tool artifacts + 6 accepted NONREENTRANT_GUARD "locked" branches in TJPositionManager).
 
 ## Key Details
 

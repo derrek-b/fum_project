@@ -246,7 +246,7 @@ Spawns a Hardhat node with a mainnet fork, auto-deploys contracts, and updates f
 | Chain ID | 1337 | 1338 |
 | Port | 8545 | 8546 |
 | Config | `hardhat.config.cjs` | `hardhat-avalanche.config.cjs` |
-| Extra contracts | V3 + V4 position validators, UniversalRouterValidator, MerklIncentiveValidator | TJPositionProxy, TJPositionManager, TJSwapValidator, TJPositionValidator |
+| Extra contracts | V3 + V4 position validators, UniversalRouterValidator | TJPositionProxy, TJPositionManager, TJSwapValidator, TJPositionValidator |
 
 **Sequence (both):**
 1. Spawn `npx hardhat node --port {port}` (Cancun hardfork for V4 transient storage)

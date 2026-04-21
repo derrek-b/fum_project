@@ -673,8 +673,4 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
      * @notice Allows the vault to receive ETH
      */
     receive() external payable {}
-
-    function getVersion() external pure returns (string memory) {
-        return "2.0.0";
-    }
 }

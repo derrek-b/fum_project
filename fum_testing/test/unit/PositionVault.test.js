@@ -196,6 +196,20 @@ describe("PositionVault - 2.0.0", function() {
         vault.burn([], [])
       ).to.be.revertedWith("PositionVault: empty batch");
     });
+
+    it("should reject incentive() with empty arrays", async function() {
+      await expect(
+        vault.incentive([], [], [])
+      ).to.be.revertedWith("PositionVault: empty batch");
+    });
+
+    it("should reject execute() with mismatched array lengths", async function() {
+      const tokenAddress = await token.getAddress();
+      const calldata = token.interface.encodeFunctionData("transfer", [user1.address, 1]);
+      await expect(
+        vault.execute([tokenAddress, tokenAddress], [calldata])
+      ).to.be.revertedWith("PositionVault: length mismatch");
+    });
   });
 
   // Test for position withdrawal security
@@ -566,6 +580,144 @@ describe("PositionVault - 2.0.0", function() {
     });
   });
 
+  describe("Generic revert paths (no returnData)", function() {
+    it("should revert with generic message when mint fails without returnData", async function() {
+      const vaultAddress = await vault.getAddress();
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const tokenAddress = await token.getAddress();
+      const token2Address = await token2.getAddress();
+
+      await positionManager.setShouldFailWithoutData(true);
+
+      // Re-encode mint manually since encodeMint is scoped inside another describe
+      const iface = new ethers.Interface([
+        "function mint((address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, address recipient, uint256 deadline) params)"
+      ]);
+      const calldata = iface.encodeFunctionData("mint", [{
+        token0: tokenAddress,
+        token1: token2Address,
+        fee: 3000,
+        tickLower: -887220,
+        tickUpper: 887220,
+        amount0Desired: ethers.parseEther("1"),
+        amount1Desired: ethers.parseEther("1"),
+        amount0Min: 0,
+        amount1Min: 0,
+        recipient: vaultAddress,
+        deadline,
+      }]);
+
+      await expect(
+        vault.mint([nonfungiblePositionManagerAddress], [calldata], [0n])
+      ).to.be.revertedWith("PositionVault: mint failed");
+    });
+
+    it("should revert with generic message when increaseLiquidity fails without returnData", async function() {
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+
+      await positionManager.setShouldFailWithoutData(true);
+
+      const iface = new ethers.Interface([
+        "function increaseLiquidity((uint256 tokenId, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, uint256 deadline) params)"
+      ]);
+      const calldata = iface.encodeFunctionData("increaseLiquidity", [{
+        tokenId: 1,
+        amount0Desired: 1000,
+        amount1Desired: 1000,
+        amount0Min: 0,
+        amount1Min: 0,
+        deadline,
+      }]);
+
+      await expect(
+        vault.increaseLiquidity([nonfungiblePositionManagerAddress], [calldata], [0n])
+      ).to.be.revertedWith("PositionVault: increaseLiquidity failed");
+    });
+  });
+
+  describe("Strategy Management", function() {
+    it("should allow owner to set a strategy", async function() {
+      await expect(vault.connect(owner).setStrategy(strategyContract.address))
+        .to.emit(vault, "StrategyChanged")
+        .withArgs(strategyContract.address);
+      expect(await vault.strategy()).to.equal(strategyContract.address);
+    });
+
+    it("should reject zero address as strategy", async function() {
+      await expect(vault.connect(owner).setStrategy(ethers.ZeroAddress))
+        .to.be.revertedWith("PositionVault: zero strategy address");
+    });
+
+    it("should reject non-owner setting a strategy", async function() {
+      await expect(vault.connect(user1).setStrategy(strategyContract.address))
+        .to.be.revertedWith("PositionVault: caller is not the owner");
+    });
+
+    it("should allow owner to remove a strategy", async function() {
+      await vault.connect(owner).setStrategy(strategyContract.address);
+      expect(await vault.strategy()).to.equal(strategyContract.address);
+
+      await expect(vault.connect(owner).removeStrategy())
+        .to.emit(vault, "StrategyChanged")
+        .withArgs(ethers.ZeroAddress);
+      expect(await vault.strategy()).to.equal(ethers.ZeroAddress);
+    });
+
+    it("should reject non-owner removing a strategy", async function() {
+      await vault.connect(owner).setStrategy(strategyContract.address);
+      await expect(vault.connect(user1).removeStrategy())
+        .to.be.revertedWith("PositionVault: caller is not the owner");
+    });
+  });
+
+  describe("Target Configuration", function() {
+    it("should return an empty array of target tokens before any are set", async function() {
+      expect(await vault.getTargetTokens()).to.deep.equal([]);
+    });
+
+    it("should allow owner to set target tokens and emit event", async function() {
+      const tokens = ["WETH", "USDC", "ARB"];
+      await expect(vault.connect(owner).setTargetTokens(tokens))
+        .to.emit(vault, "TargetTokensUpdated")
+        .withArgs(tokens);
+      expect(await vault.getTargetTokens()).to.deep.equal(tokens);
+    });
+
+    it("should overwrite previous target tokens on re-set", async function() {
+      await vault.connect(owner).setTargetTokens(["WETH", "USDC"]);
+      await vault.connect(owner).setTargetTokens(["LINK"]);
+      expect(await vault.getTargetTokens()).to.deep.equal(["LINK"]);
+    });
+
+    it("should reject non-owner setting target tokens", async function() {
+      await expect(vault.connect(user1).setTargetTokens(["WETH"]))
+        .to.be.revertedWith("PositionVault: caller is not the owner");
+    });
+
+    it("should return an empty array of target platforms before any are set", async function() {
+      expect(await vault.getTargetPlatforms()).to.deep.equal([]);
+    });
+
+    it("should allow owner to set target platforms and emit event", async function() {
+      const platforms = ["uniswap_v3", "uniswap_v4"];
+      await expect(vault.connect(owner).setTargetPlatforms(platforms))
+        .to.emit(vault, "TargetPlatformsUpdated")
+        .withArgs(platforms);
+      expect(await vault.getTargetPlatforms()).to.deep.equal(platforms);
+    });
+
+    it("should overwrite previous target platforms on re-set", async function() {
+      await vault.connect(owner).setTargetPlatforms(["uniswap_v3"]);
+      await vault.connect(owner).setTargetPlatforms(["uniswap_v4", "traderjoe_v2_2"]);
+      expect(await vault.getTargetPlatforms()).to.deep.equal(["uniswap_v4", "traderjoe_v2_2"]);
+    });
+
+    it("should reject non-owner setting target platforms", async function() {
+      await expect(vault.connect(user1).setTargetPlatforms(["uniswap_v3"]))
+        .to.be.revertedWith("PositionVault: caller is not the owner");
+    });
+  });
+
   // Test for contract version
   describe("Contract Version", function() {
     it("should return the correct version", async function() {
@@ -715,6 +867,31 @@ describe("PositionVault - 2.0.0", function() {
         .to.emit(vault, "TokensWithdrawn")
         .withArgs(ethers.ZeroAddress, owner.address, amount);
     });
+
+    it("should revert with 'ETH transfer failed' when owner rejects ETH", async function() {
+      const MaliciousOwner = await ethers.getContractFactory("MaliciousOwner");
+      const maliciousOwner = await MaliciousOwner.deploy();
+      await maliciousOwner.waitForDeployment();
+
+      const factoryAddress = await factory.getAddress();
+      const createTx = await maliciousOwner.createVault(factoryAddress, "Malicious Vault");
+      const createReceipt = await createTx.wait();
+      // Logs from indirect call aren't auto-parsed; match via factory.interface.parseLog
+      const vaultCreatedLog = createReceipt.logs.find(log => {
+        try {
+          const parsed = factory.interface.parseLog(log);
+          return parsed && parsed.name === 'VaultCreated';
+        } catch { return false; }
+      });
+      const maliciousVaultAddress = factory.interface.parseLog(vaultCreatedLog).args[1];
+
+      const amount = ethers.parseEther("1");
+      await owner.sendTransaction({ to: maliciousVaultAddress, value: amount });
+
+      await expect(
+        maliciousOwner.triggerWithdrawETH(maliciousVaultAddress, amount)
+      ).to.be.revertedWith("PositionVault: ETH transfer failed");
+    });
   });
 
   // Test for WETH unwrap and withdraw
@@ -797,6 +974,36 @@ describe("PositionVault - 2.0.0", function() {
 
       const finalOwnerBalance = await ethers.provider.getBalance(owner.address);
       expect(finalOwnerBalance).to.equal(initialOwnerBalance + amount);
+    });
+
+    it("should revert with 'ETH transfer failed' when owner rejects ETH", async function() {
+      const MaliciousOwner = await ethers.getContractFactory("MaliciousOwner");
+      const maliciousOwner = await MaliciousOwner.deploy();
+      await maliciousOwner.waitForDeployment();
+
+      const factoryAddress = await factory.getAddress();
+      const createTx = await maliciousOwner.createVault(factoryAddress, "Malicious Vault");
+      const createReceipt = await createTx.wait();
+      // Logs from indirect call aren't auto-parsed; match via factory.interface.parseLog
+      const vaultCreatedLog = createReceipt.logs.find(log => {
+        try {
+          const parsed = factory.interface.parseLog(log);
+          return parsed && parsed.name === 'VaultCreated';
+        } catch { return false; }
+      });
+      const maliciousVaultAddress = factory.interface.parseLog(vaultCreatedLog).args[1];
+
+      const amount = ethers.parseEther("1");
+      await weth.deposit({ value: amount });
+      await weth.transfer(maliciousVaultAddress, amount);
+
+      await expect(
+        maliciousOwner.triggerUnwrapAndWithdrawETH(
+          maliciousVaultAddress,
+          await weth.getAddress(),
+          amount
+        )
+      ).to.be.revertedWith("PositionVault: ETH transfer failed");
     });
   });
 
@@ -1088,6 +1295,18 @@ describe("PositionVault - 2.0.0", function() {
           [approveData]
         )
       ).to.be.revertedWith("PositionVault: caller is not authorized");
+    });
+
+    it("should revert with 'approval failed' when token approve reverts", async function() {
+      await token.setShouldFailApprove(true);
+      const approveData = encodeApprove(nonfungiblePositionManagerAddress, ethers.parseEther("100"));
+
+      await expect(
+        vault.approve(
+          [await token.getAddress()],
+          [approveData]
+        )
+      ).to.be.revertedWith("PositionVault: approval failed");
     });
 
     it("should allow executor to approve tokens", async function() {
@@ -2021,6 +2240,25 @@ describe("PositionVault - 2.0.0", function() {
         )
       ).to.emit(vault, "TransactionExecuted");
     });
+
+    it("should revert with 'decreaseLiquidity failed' when target call reverts", async function() {
+      await positionManager.setShouldFail(true);
+
+      const vaultAddress = await vault.getAddress();
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const maxUint128 = 2n ** 128n - 1n;
+
+      const decreaseCalldata = encodeDecreaseLiquidity(1, 1000, 0, 0, deadline);
+      const collectCalldata = encodeCollect(1, vaultAddress, maxUint128, maxUint128);
+      const multicallData = encodeMulticall([decreaseCalldata, collectCalldata]);
+
+      await expect(
+        vault.decreaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [multicallData]
+        )
+      ).to.be.revertedWith("PositionVault: decreaseLiquidity failed");
+    });
   });
 
   // Test for collect function (fee collection)
@@ -2151,6 +2389,21 @@ describe("PositionVault - 2.0.0", function() {
       ).to.emit(vault, "TransactionExecuted")
         .withArgs(nonfungiblePositionManagerAddress, calldata, true, "collect");
     });
+
+    it("should revert with 'collect failed' when target call reverts", async function() {
+      await positionManager.setShouldFail(true);
+
+      const vaultAddress = await vault.getAddress();
+      const maxUint128 = 2n ** 128n - 1n;
+      const calldata = encodeCollect(1, vaultAddress, maxUint128, maxUint128);
+
+      await expect(
+        vault.collect(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: collect failed");
+    });
   });
 
   // Test for burn function (burn empty position NFTs)
@@ -2264,6 +2517,18 @@ describe("PositionVault - 2.0.0", function() {
           [shortCalldata]
         )
       ).to.be.revertedWith("UniswapV3PositionValidator: invalid calldata");
+    });
+
+    it("should revert with 'burn failed' when target call reverts", async function() {
+      await positionManager.setShouldFail(true);
+      const calldata = encodeBurn(1);
+
+      await expect(
+        vault.burn(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: burn failed");
     });
   });
 
@@ -3176,6 +3441,104 @@ describe("PositionVault - 2.0.0", function() {
           vault.connect(executorWallet).execute([tokenAddress], [calldata])
         ).to.be.revertedWith("PositionVault: caller is not the owner");
       });
+    });
+  });
+
+  describe("Incentive Function", function() {
+    let merklIncentiveValidator;
+    const CLAIM_SELECTOR = "0xa0165082";
+
+    // Helper to encode Merkl claim(address user, address[] tokens, uint256[] amounts, bytes32[][] proofs) calldata
+    function encodeClaim(user, tokens, amounts, proofs) {
+      const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+      const encoded = abiCoder.encode(
+        ["address", "address[]", "uint256[]", "bytes32[][]"],
+        [user, tokens, amounts, proofs]
+      );
+      return CLAIM_SELECTOR + encoded.slice(2);
+    }
+
+    beforeEach(async function() {
+      // Deploy the Merkl incentive validator
+      const MerklIncentiveValidator = await ethers.getContractFactory("MerklIncentiveValidator");
+      merklIncentiveValidator = await MerklIncentiveValidator.deploy();
+      await merklIncentiveValidator.waitForDeployment();
+
+      // Register it for the position manager mock — we use the mock's address as the
+      // "distributor" target. The mock has no claim() function, so calls will revert
+      // (with empty returnData) which lets us exercise the "incentive operation failed" path.
+      await factory.setIncentiveValidator(
+        nonfungiblePositionManagerAddress,
+        await merklIncentiveValidator.getAddress()
+      );
+    });
+
+    it("should reject mismatched targets/data lengths", async function() {
+      const vaultAddress = await vault.getAddress();
+      const calldata = encodeClaim(vaultAddress, [], [], []);
+
+      await expect(
+        vault.incentive(
+          [nonfungiblePositionManagerAddress, nonfungiblePositionManagerAddress],
+          [calldata],
+          [0n, 0n]
+        )
+      ).to.be.revertedWith("PositionVault: length mismatch");
+    });
+
+    it("should reject mismatched targets/values lengths", async function() {
+      const vaultAddress = await vault.getAddress();
+      const calldata = encodeClaim(vaultAddress, [], [], []);
+
+      await expect(
+        vault.incentive(
+          [nonfungiblePositionManagerAddress],
+          [calldata],
+          [0n, 0n]
+        )
+      ).to.be.revertedWith("PositionVault: values length mismatch");
+    });
+
+    it("should revert when vault has insufficient ETH for the values total", async function() {
+      const vaultAddress = await vault.getAddress();
+      const calldata = encodeClaim(vaultAddress, [], [], []);
+
+      // Vault has no ETH; require value > 0 to trigger the balance check
+      await expect(
+        vault.incentive(
+          [nonfungiblePositionManagerAddress],
+          [calldata],
+          [ethers.parseEther("1.0")]
+        )
+      ).to.be.revertedWith("PositionVault: insufficient ETH balance");
+    });
+
+    it("should reject non-authorized caller", async function() {
+      const vaultAddress = await vault.getAddress();
+      const calldata = encodeClaim(vaultAddress, [], [], []);
+
+      await expect(
+        vault.connect(user1).incentive(
+          [nonfungiblePositionManagerAddress],
+          [calldata],
+          [0n]
+        )
+      ).to.be.revertedWith("PositionVault: caller is not authorized");
+    });
+
+    it("should revert with 'incentive operation failed' when target call reverts", async function() {
+      const vaultAddress = await vault.getAddress();
+      const calldata = encodeClaim(vaultAddress, [], [], []);
+
+      // The mock has no claim() function and no fallback, so the call reverts
+      // with empty returnData — exercises the require(success, ...) path.
+      await expect(
+        vault.incentive(
+          [nonfungiblePositionManagerAddress],
+          [calldata],
+          [0n]
+        )
+      ).to.be.revertedWith("PositionVault: incentive operation failed");
     });
   });
 });

@@ -5,7 +5,7 @@ Mock contract APIs, deployment sequences, calldata encoding helpers, and testing
 
 ## Mock Contracts
 
-Eight mock contracts simulate external protocols. All live in `contracts/` alongside the real contracts (not in a subdirectory).
+Eight mock contracts simulate external protocols, plus one test actor (`MaliciousOwner`) exercises specific failure behavior. All live in `contracts/` alongside the real contracts (not in a subdirectory).
 
 ### MockERC20
 
@@ -165,6 +165,23 @@ constructor()
 | Function | Notes |
 |---|---|
 | `approve(address token, address spender, uint160 amount, uint48 expiration)` | Emits `Approval` event only (no state) |
+
+### MaliciousOwner (test actor)
+
+**Purpose:** A contract whose `receive()` reverts. Used to exercise `PositionVault.withdrawETH` and `unwrapAndWithdrawETH` `require(success, "PositionVault: ETH transfer failed")` branches — paths that only fire when the vault's owner rejects incoming ETH.
+
+```solidity
+constructor()
+```
+
+| Function | Notes |
+|---|---|
+| `createVault(address factory, string name)` | Calls `VaultFactory.createVault` so the resulting vault's `owner` is this contract. Returns the vault address (emitted via `VaultCreated`). |
+| `triggerWithdrawETH(address vault, uint256 amount)` | Proxies `vault.withdrawETH(amount)` — the vault's `onlyOwner` modifier requires `msg.sender == owner`, so owner-only calls must route through this contract. |
+| `triggerUnwrapAndWithdrawETH(address vault, address weth, uint256 amount)` | Proxies `vault.unwrapAndWithdrawETH(weth, amount)`. |
+| `receive()` | Reverts with `"MaliciousOwner: rejects ETH"` — any ETH transfer to this contract fails. |
+
+**Not a mock in the usual sense** — it doesn't simulate a real external contract, it implements specific test behavior (reverting `receive()`). Listed in `.solcover.js` `skipFiles` to keep it out of coverage reports.
 
 ---
 

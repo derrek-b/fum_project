@@ -243,6 +243,17 @@ describe("UniswapV3PositionValidator", function() {
         .to.be.revertedWith("UniswapV3PositionValidator: function not allowed in multicall");
     });
 
+    it("should reject multicall with truncated collect inner call", async function() {
+      // Inner call = bare COLLECT_SELECTOR (4 bytes) — passes the generic length>=4 check
+      // but fails the collect-specific length>=68 check.
+      const decreaseCall = encodeDecreaseLiquidity(1, 1000, 0, 0, deadline);
+      const truncatedCollect = SELECTORS.COLLECT; // "0xfc6f7865" — 4 bytes
+      const calldata = encodeMulticall([decreaseCall, truncatedCollect]);
+
+      await expect(validator.validateDecreaseLiquidity(calldata, vaultAddress))
+        .to.be.revertedWith("UniswapV3PositionValidator: invalid collect data");
+    });
+
     it("should reject calldata that is too short", async function() {
       await expect(validator.validateDecreaseLiquidity("0x12", vaultAddress))
         .to.be.revertedWith("UniswapV3PositionValidator: invalid calldata");

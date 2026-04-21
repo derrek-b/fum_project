@@ -258,16 +258,6 @@ export async function deployFUMContracts(deployer, config = {}) {
         console.log(`  ⚠️ V4 not configured for chainId ${chainId}, skipping V4 validator registration`);
       }
 
-      // Deploy and register Merkl incentive validator
-      const chainConfig = getChainConfig(chainId);
-      if (chainConfig.merklDistributorAddress) {
-        contracts.merklIncentiveValidator = await deployContract(deployer, 'MerklIncentiveValidator');
-        await contracts.vaultFactory.setIncentiveValidator(
-          chainConfig.merklDistributorAddress,
-          contracts.merklIncentiveValidator.address
-        );
-        console.log(`  ✅ MerklIncentiveValidator registered for ${chainConfig.merklDistributorAddress}`);
-      }
     } else {
       // Avalanche fork - deploy Trader Joe contracts
       const tjAddresses = getPlatformAddresses(chainId, 'traderjoeV2_2');
@@ -319,11 +309,6 @@ export async function deployFUMContracts(deployer, config = {}) {
     }
     if (contracts.tjSwapValidator) {
       addresses.TJSwapValidator = contracts.tjSwapValidator.address;
-    }
-
-    // Add incentive validator addresses if deployed
-    if (contracts.merklIncentiveValidator) {
-      addresses.MerklIncentiveValidator = contracts.merklIncentiveValidator.address;
     }
 
     // Validate deterministic addresses - fail fast if they don't match expected values

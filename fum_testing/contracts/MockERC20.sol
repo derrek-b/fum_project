@@ -11,12 +11,30 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 contract MockERC20 is ERC20, Ownable {
     uint8 private _decimals;
 
+    // For simulating approval failures (tests caller's "approval failed" require path)
+    bool public shouldFailApprove;
+
     constructor(
         string memory name,
         string memory symbol,
         uint8 decimals_
     ) ERC20(name, symbol) Ownable(msg.sender) {
         _decimals = decimals_;
+    }
+
+    /**
+     * @notice Set whether approve calls should revert
+     */
+    function setShouldFailApprove(bool _shouldFailApprove) external {
+        shouldFailApprove = _shouldFailApprove;
+    }
+
+    /**
+     * @notice Override approve to optionally revert when shouldFailApprove is true
+     */
+    function approve(address spender, uint256 value) public override returns (bool) {
+        require(!shouldFailApprove, "MockERC20: forced approval failure");
+        return super.approve(spender, value);
     }
 
     /**

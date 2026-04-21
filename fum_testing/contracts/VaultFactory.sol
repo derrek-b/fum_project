@@ -351,8 +351,4 @@ contract VaultFactory is Ownable {
     function getActiveVaultCount() external view returns (uint256) {
         return activeVaults.length;
     }
-
-    function getVersion() external pure returns (string memory) {
-        return "2.0.0";
-    }
 }

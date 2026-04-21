@@ -147,6 +147,26 @@ describe("StrategyBase", function () {
       // Verify parameter was set
       expect(await strategy.getTargetRangeUpper(vault1Address)).to.equal(600);
     });
+
+    it("Should fail authorizeVault when target has no owner() function", async function() {
+      // user2 is an EOA — staticcall succeeds with empty data, fails the data.length == 32 check
+      await expect(
+        strategy.connect(user1).authorizeVault(user2.address)
+      ).to.be.revertedWith("StrategyBase: failed to get vault owner");
+    });
+
+    it("Should fail deauthorizeVault when target has no owner() function", async function() {
+      await expect(
+        strategy.connect(user1).deauthorizeVault(user2.address)
+      ).to.be.revertedWith("StrategyBase: failed to get vault owner");
+    });
+
+    it("Should fail selectTemplate when called directly by non-authorized address", async function() {
+      // Direct call (not via vault.execute) exercises the onlyAuthorizedVault failure branch
+      await expect(
+        strategy.connect(user2).selectTemplate(TEMPLATE_CONSERVATIVE)
+      ).to.be.revertedWith("StrategyBase: caller is not an authorized vault");
+    });
   });
 
   describe("Template Selection", function () {

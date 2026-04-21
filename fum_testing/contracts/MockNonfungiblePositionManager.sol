@@ -34,6 +34,9 @@ contract MockNonfungiblePositionManager {
     // For simulating failures
     bool public shouldFail;
 
+    // For simulating empty-revert failures (no returnData) — exercises generic revert paths in callers
+    bool public shouldFailWithoutData;
+
     // Return values for mint/increaseLiquidity
     uint256 public returnTokenId;
     uint128 public returnLiquidity;
@@ -89,6 +92,13 @@ contract MockNonfungiblePositionManager {
     }
 
     /**
+     * @notice Set whether calls should revert with no returnData (tests caller's generic revert path)
+     */
+    function setShouldFailWithoutData(bool _shouldFailWithoutData) external {
+        shouldFailWithoutData = _shouldFailWithoutData;
+    }
+
+    /**
      * @notice Set the return values for mint/increaseLiquidity
      */
     function setReturnValues(uint128 _liquidity, uint256 _amount0, uint256 _amount1) external {
@@ -132,6 +142,9 @@ contract MockNonfungiblePositionManager {
             uint256 amount1
         )
     {
+        if (shouldFailWithoutData) {
+            assembly { revert(0, 0) }
+        }
         require(!shouldFail, "MockNonfungiblePositionManager: forced failure");
 
         // Store parameters for verification
@@ -182,6 +195,9 @@ contract MockNonfungiblePositionManager {
             uint256 amount1
         )
     {
+        if (shouldFailWithoutData) {
+            assembly { revert(0, 0) }
+        }
         require(!shouldFail, "MockNonfungiblePositionManager: forced failure");
 
         // Store parameters for verification

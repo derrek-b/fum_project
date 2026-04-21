@@ -147,6 +147,7 @@ describe("BabyStepsStrategy", function () {
     it("Should return aggressive template values", async function () {
       expect(await strategy.getTargetRangeUpper(vault1Address)).to.equal(AGG_TARGET_RANGE_UPPER);
       expect(await strategy.getTargetRangeLower(vault1Address)).to.equal(AGG_TARGET_RANGE_LOWER);
+      expect(await strategy.getFeeReinvestment(vault1Address)).to.equal(true);
       expect(await strategy.getReinvestmentTrigger(vault1Address)).to.equal(AGG_REINVESTMENT_TRIGGER);
       expect(await strategy.getReinvestmentRatio(vault1Address)).to.equal(AGG_REINVESTMENT_RATIO);
       expect(await strategy.getMaxSlippage(vault1Address)).to.equal(AGG_MAX_SLIPPAGE);
@@ -162,6 +163,7 @@ describe("BabyStepsStrategy", function () {
     it("Should return stablecoin template values", async function () {
       expect(await strategy.getTargetRangeUpper(vault1Address)).to.equal(STBL_TARGET_RANGE_UPPER);
       expect(await strategy.getTargetRangeLower(vault1Address)).to.equal(STBL_TARGET_RANGE_LOWER);
+      expect(await strategy.getFeeReinvestment(vault1Address)).to.equal(true);
       expect(await strategy.getReinvestmentTrigger(vault1Address)).to.equal(STBL_REINVESTMENT_TRIGGER);
       expect(await strategy.getReinvestmentRatio(vault1Address)).to.equal(STBL_REINVESTMENT_RATIO);
       expect(await strategy.getMaxSlippage(vault1Address)).to.equal(STBL_MAX_SLIPPAGE);
@@ -208,6 +210,24 @@ describe("BabyStepsStrategy", function () {
       await expect(vault1Contract.connect(user1).execute([strategyAddress], [data]))
         .to.emit(strategy, "ParameterUpdated")
         .withArgs(vault1Address, "rangeParameters");
+    });
+
+    it("Should fail setRangeParameters when called directly by non-authorized address", async function () {
+      await expect(
+        strategy.connect(user1).setRangeParameters(600, 400)
+      ).to.be.revertedWith("StrategyBase: caller is not an authorized vault");
+    });
+
+    it("Should fail setFeeParameters when called directly by non-authorized address", async function () {
+      await expect(
+        strategy.connect(user1).setFeeParameters(false, 10000, 7500)
+      ).to.be.revertedWith("StrategyBase: caller is not an authorized vault");
+    });
+
+    it("Should fail setRiskParameters when called directly by non-authorized address", async function () {
+      await expect(
+        strategy.connect(user1).setRiskParameters(40, 1200)
+      ).to.be.revertedWith("StrategyBase: caller is not an authorized vault");
     });
   });
 

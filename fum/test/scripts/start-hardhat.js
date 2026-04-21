@@ -146,7 +146,6 @@ async function deployContracts(port) {
       'UniversalRouterValidator',
       'UniswapV3PositionValidator',
       'UniswapV4PositionValidator',
-      'MerklIncentiveValidator',
     ];
 
     const deployedValidators = {};
@@ -199,14 +198,6 @@ async function deployContracts(port) {
         const tx3 = await factoryContract.setLiquidityValidator(v4PositionManagerAddress, deployedValidators.UniswapV4PositionValidator);
         await tx3.wait();
         console.log(`  Registered UniswapV4PositionValidator for positionManager ${v4PositionManagerAddress}`);
-      }
-
-      // Incentive validator: Merkl Distributor
-      if (deployedValidators.MerklIncentiveValidator) {
-        const merklDistributorAddress = chainConfig.merklDistributorAddress;
-        const tx4 = await factoryContract.setIncentiveValidator(merklDistributorAddress, deployedValidators.MerklIncentiveValidator);
-        await tx4.wait();
-        console.log(`  Registered MerklIncentiveValidator for distributor ${merklDistributorAddress}`);
       }
 
       console.log("Validator registration complete!");

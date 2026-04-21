@@ -463,6 +463,91 @@ describe("UniswapV4PositionValidator", function() {
         .to.be.revertedWith("UniswapV4PositionValidator: take pair recipient must be vault or MSG_SENDER");
     });
 
+    it("should allow collect with TAKE to vault", async function() {
+      const decreaseParams = encodeModifyLiquidityParams(1, 0, 0, 0);
+      const takeParams0 = encodeTakeParams(token0, vaultAddress, ethers.parseEther("1"));
+      const takeParams1 = encodeTakeParams(token1, vaultAddress, ethers.parseEther("1"));
+
+      const calldata = encodeModifyLiquidities(
+        [ACTIONS.DECREASE_LIQUIDITY, ACTIONS.TAKE, ACTIONS.TAKE],
+        [decreaseParams, takeParams0, takeParams1],
+        deadline
+      );
+
+      await expect(validator.validateCollect(calldata, vaultAddress)).to.not.be.reverted;
+    });
+
+    it("should reject collect with TAKE to non-vault", async function() {
+      const decreaseParams = encodeModifyLiquidityParams(1, 0, 0, 0);
+      const takeParams = encodeTakeParams(token0, otherAddress, ethers.parseEther("1"));
+
+      const calldata = encodeModifyLiquidities(
+        [ACTIONS.DECREASE_LIQUIDITY, ACTIONS.TAKE],
+        [decreaseParams, takeParams],
+        deadline
+      );
+
+      await expect(validator.validateCollect(calldata, vaultAddress))
+        .to.be.revertedWith("UniswapV4PositionValidator: take recipient must be vault");
+    });
+
+    it("should allow collect with TAKE_PORTION to vault", async function() {
+      const decreaseParams = encodeModifyLiquidityParams(1, 0, 0, 0);
+      const takePortionParams0 = encodeTakePortionParams(token0, vaultAddress, 10000);
+      const takePortionParams1 = encodeTakePortionParams(token1, vaultAddress, 10000);
+
+      const calldata = encodeModifyLiquidities(
+        [ACTIONS.DECREASE_LIQUIDITY, ACTIONS.TAKE_PORTION, ACTIONS.TAKE_PORTION],
+        [decreaseParams, takePortionParams0, takePortionParams1],
+        deadline
+      );
+
+      await expect(validator.validateCollect(calldata, vaultAddress)).to.not.be.reverted;
+    });
+
+    it("should reject collect with TAKE_PORTION to non-vault", async function() {
+      const decreaseParams = encodeModifyLiquidityParams(1, 0, 0, 0);
+      const takePortionParams = encodeTakePortionParams(token0, otherAddress, 10000);
+
+      const calldata = encodeModifyLiquidities(
+        [ACTIONS.DECREASE_LIQUIDITY, ACTIONS.TAKE_PORTION],
+        [decreaseParams, takePortionParams],
+        deadline
+      );
+
+      await expect(validator.validateCollect(calldata, vaultAddress))
+        .to.be.revertedWith("UniswapV4PositionValidator: take portion recipient must be vault");
+    });
+
+    it("should allow collect with SWEEP to vault", async function() {
+      const decreaseParams = encodeModifyLiquidityParams(1, 0, 0, 0);
+      const takePairParams = encodeTakePairParams(token0, token1, vaultAddress);
+      const sweepParams = encodeSweepParams(ethers.ZeroAddress, vaultAddress);
+
+      const calldata = encodeModifyLiquidities(
+        [ACTIONS.DECREASE_LIQUIDITY, ACTIONS.TAKE_PAIR, ACTIONS.SWEEP],
+        [decreaseParams, takePairParams, sweepParams],
+        deadline
+      );
+
+      await expect(validator.validateCollect(calldata, vaultAddress)).to.not.be.reverted;
+    });
+
+    it("should reject collect with SWEEP to non-vault", async function() {
+      const decreaseParams = encodeModifyLiquidityParams(1, 0, 0, 0);
+      const takePairParams = encodeTakePairParams(token0, token1, vaultAddress);
+      const sweepParams = encodeSweepParams(ethers.ZeroAddress, otherAddress);
+
+      const calldata = encodeModifyLiquidities(
+        [ACTIONS.DECREASE_LIQUIDITY, ACTIONS.TAKE_PAIR, ACTIONS.SWEEP],
+        [decreaseParams, takePairParams, sweepParams],
+        deadline
+      );
+
+      await expect(validator.validateCollect(calldata, vaultAddress))
+        .to.be.revertedWith("UniswapV4PositionValidator: sweep recipient must be vault");
+    });
+
     it("should reject calldata that is too short", async function() {
       await expect(validator.validateCollect("0x12", vaultAddress))
         .to.be.revertedWith("UniswapV4PositionValidator: invalid calldata");
