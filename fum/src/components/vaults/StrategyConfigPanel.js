@@ -153,11 +153,6 @@ const StrategyConfigPanel = ({
       if (vault.strategy.selectedPlatforms) {
         setSelectedPlatforms(vault.strategy.selectedPlatforms);
       }
-    } else if (vault?.hasActiveStrategy) {
-      // Fallback to 'fed' if we know there's a strategy but don't have details
-      setSelectedStrategy('fed');
-      setInitialSelectedStrategy('fed');
-      setCurrentPresetDefaults({});
     } else {
       setSelectedStrategy('');
       setInitialSelectedStrategy('');

@@ -11,8 +11,6 @@ module.exports = {
     'MockWETH.sol',
     // Test actors — not mocks of real contracts, but test helpers with specific behavior
     'MaliciousOwner.sol',
-    // In-development, not actively being worked on
-    'ParrisIslandStrategy.sol',
   ],
   configureYulOptimizer: true,
 };

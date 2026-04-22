@@ -1,4 +1,4 @@
-<!-- Source: contracts/PositionVault.sol, contracts/VaultFactory.sol, contracts/StrategyBase.sol, contracts/BabyStepsStrategy.sol, contracts/ParrisIslandStrategy.sol, contracts/TJPositionManager.sol, contracts/TJPositionProxy.sol, contracts/interfaces/*, contracts/validators/* -->
+<!-- Source: contracts/PositionVault.sol, contracts/VaultFactory.sol, contracts/StrategyBase.sol, contracts/BabyStepsStrategy.sol, contracts/TJPositionManager.sol, contracts/TJPositionProxy.sol, contracts/interfaces/*, contracts/validators/* -->
 # Contract System
 
 How all smart contracts relate, their execution flows, and the factory-validator-strategy architecture that enables secure, extensible DeFi vault management.
@@ -11,7 +11,6 @@ How all smart contracts relate, their execution flows, and the factory-validator
 | PositionVault | User-controlled vault for tokens + LP positions | One per user (via factory) | 2.0.0 |
 | StrategyBase | Abstract base for automation strategies | Never deployed directly | — |
 | BabyStepsStrategy | Conservative range-based strategy | One per chain | 2.0.0 |
-| ParrisIslandStrategy | Advanced adaptive strategy (in development) | One per chain | 0.4.0 |
 | TJPositionManager | Manages Trader Joe V2.2 bin positions (proxy-per-position) | One per chain | — |
 | TJPositionProxy | EIP-1167 minimal proxy holding ERC1155 LB tokens | One per position (cloned) | — |
 | UniversalRouterValidator | Validates Uniswap Universal Router swaps | One per chain | — |
@@ -253,25 +252,6 @@ User calls strategy.authorizeVault(vaultAddress)
 | `emergencyExitTrigger` | uint16 (bps) | 6 | `setRiskParameters` |
 
 > **Note:** Template constants for `reinvestmentTrigger` are stored as cents (e.g., `CONS_REINVESTMENT_TRIGGER = 5000` = $50.00). The field comment in `BabyStepsStrategy.sol` mislabels this as "USD value in wei (18 decimals)" — the template constants and all downstream comparisons treat the value as cents.
-
-### ParrisIslandStrategy
-
-**Source:** `contracts/ParrisIslandStrategy.sol` — In development
-
-**Enums:** `OracleSource { DEX, Chainlink, TWAP }`, `PlatformSelectionCriteria { HighestTVL, HighestVolume, LowestFees, HighestRewards }`
-
-**26 parameters** across 7 setter groups:
-- Bits 0–3: Range/threshold (upper, lower, rebalance thresholds)
-- Bits 4–6: Fee settings (reinvestment, trigger, ratio)
-- Bits 7–9: Risk management (slippage, emergency exit, max utilization)
-- Bits 10–18: Adaptive ranges (9 params: enabled, count thresholds, timeframes, adjustments)
-- Bits 19–20: Oracle (source enum, price deviation tolerance)
-- Bits 21–23: Position sizing (max size %, min size, target utilization)
-- Bits 24–25: Platform selection (criteria enum, min pool liquidity)
-
-**3 templates:** CONSERVATIVE, MODERATE, AGGRESSIVE
-
----
 
 ## TJPositionManager + TJPositionProxy
 

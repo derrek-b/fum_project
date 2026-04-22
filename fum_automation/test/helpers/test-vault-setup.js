@@ -23,9 +23,6 @@ const ERC20_ABI = [
  */
 const STRATEGY_CONTRACT_MAP = {
   'bob': 'BabyStepsStrategy',
-  // Future strategies:
-  // 'parris': 'ParrisStrategy',
-  // 'fed': 'FedStrategy',
 };
 
 /**
@@ -95,7 +92,7 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
     targetPlatforms: ['uniswapV3'], // Target platforms for the vault
 
     // Strategy configuration
-    strategy: 'bob',            // Strategy ID: 'bob' | 'parris' | 'fed' (future)
+    strategy: 'bob',            // Strategy ID: currently only 'bob' is supported
 
     vaultName: 'Test Vault',
     slippageTolerance: 1

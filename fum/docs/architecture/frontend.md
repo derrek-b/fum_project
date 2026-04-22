@@ -114,7 +114,7 @@ Persisted to `localStorage["fum_wallet_connection"]`. Reducers: `setWallet`, `di
     }
   },
   strategy: {
-    strategyId: string,              // "bob", "parris", "fed"
+    strategyId: string,              // "bob"
     strategyAddress: string,
     isActive: boolean,
     selectedTokens: [string],        // Target token addresses
@@ -195,7 +195,7 @@ The `inVault` flag is the key discriminator. `setPositions` marks all incoming a
 ```javascript
 {
   availableStrategies: [{
-    id: string,                      // "bob", "parris", "fed", "none"
+    id: string,                      // "bob", "none"
     name: string,
     subtitle: string,
     description: string,

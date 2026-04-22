@@ -36,8 +36,7 @@ const VALIDATOR_CONTRACTS = [
 
 // Additional contracts synced to fum_testing with --sync-only flag (for testing but not distributed)
 const TESTING_ONLY_CONTRACTS = [
-  'StrategyBase',
-  'ParrisIslandStrategy'
+  'StrategyBase'
 ];
 
 // Subdirectories to sync entirely to fum_testing (interfaces, validators, etc.)

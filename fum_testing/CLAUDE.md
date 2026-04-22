@@ -40,7 +40,6 @@ test/unit/
 ├── VaultFactory.test.js               # Factory deployment and vault creation
 ├── StrategyBase.test.js               # Abstract strategy base tests
 ├── BabyStepsStrategy.test.js          # Conservative strategy logic
-├── ParrisIslandStrategy.test.js       # Advanced adaptive strategy
 ├── TJPositionManager.test.js          # Trader Joe V2.2 bin position management
 ├── TJPositionProxy.test.js            # Proxy initialization, execution, and access control
 └── validators/

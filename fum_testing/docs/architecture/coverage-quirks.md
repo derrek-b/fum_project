@@ -33,7 +33,7 @@ Two things combine:
 1. **`viaIR: true`** rewrites Solidity through the Yul IR pipeline. The IR aggressively inlines, reorders, and merges branches. Statements and branches that the source writer sees as distinct can collapse into a single instrumentation point.
 2. **solidity-coverage 0.8.16** instruments AST nodes and counts hits at the bytecode offsets it injects. When the IR pipeline moves or folds those offsets, hits land at the wrong node (or nowhere), producing `DA:0` / `BRDA:0` on code that clearly ran.
 
-viaIR cannot be disabled: `TJPositionManager.sol` and `ParrisIslandStrategy.sol` exceed the stack-depth limit with the legacy pipeline. Turning off viaIR breaks compilation.
+viaIR cannot be disabled: `TJPositionManager.sol` exceeds the stack-depth limit with the legacy pipeline. Turning off viaIR breaks compilation.
 
 `.solcover.js` sets `configureYulOptimizer: true` as a partial workaround, but the quirks documented below still appear.
 

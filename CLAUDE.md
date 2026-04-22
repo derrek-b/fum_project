@@ -72,10 +72,9 @@ cd fum_testing && npx hardhat node       # Start local node
 ## Architecture Overview
 
 ### Smart Contracts (fum/contracts/)
-- **PositionVault** — User-controlled vault for ERC20s, native ETH, and LP positions. Supports swaps via UniversalRouter, minting, liquidity operations, incentive claims, ETH wrapping.
+- **PositionVault** — User-controlled vault for ERC20s, native ETH, and LP positions. Supports swaps via UniversalRouter, minting, liquidity operations, ETH wrapping.
 - **VaultFactory** — Deploys and tracks PositionVault instances. Manages three validator registries (swap, liquidity, incentive).
 - **BabyStepsStrategy** — Conservative range-based automation strategy with configurable parameters.
-- **ParrisIslandStrategy** — Advanced adaptive strategy with dynamic range adjustments (in development).
 - **TJPositionManager** — Manages Trader Joe V2.2 liquidity bin positions via per-position EIP-1167 proxies. Off-chain fee math via LiquidityHelperContract.
 - **TJPositionProxy** — Minimal proxy (EIP-1167) cloned per Trader Joe position. Holds ERC1155 LB tokens for per-position fee attribution.
 - **MerklIncentiveValidator** — Validates Merkl Distributor `claim()` calls (selector + user == vault).
@@ -93,7 +92,7 @@ cd fum_testing && npx hardhat node       # Start local node
 Event-driven architecture. Modules in `src/core/`:
 1. **AutomationService** — Orchestration: vault discovery, strategy allocation, processing loop
 2. **VaultDataService** — Data layer: vault state, position tracking, token balances
-3. **Strategies** — StrategyBase → BabyStepsStrategy / ParrisIslandStrategy. Each strategy handles evaluation (is position in range?), rebalancing, fee collection, and position creation. Lives under `src/strategies/`.
+3. **Strategies** — StrategyBase → BabyStepsStrategy. Each strategy handles evaluation (is position in range?), rebalancing, fee collection, and position creation. Lives under `src/strategies/`.
 4. **EventManager** — Centralized pub/sub for system events (PositionRebalanced, FeesCollected, NewPositionCreated, etc.)
 5. **Tracker** — Transaction history and performance tracking
 6. **VaultHealth** — Executor gas monitoring and automated top-ups (holdback + funding-required state)

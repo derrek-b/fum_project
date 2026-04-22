@@ -195,7 +195,7 @@ export const calculateVaultAPY = (trackerMetadata) => {
 /**
  * Fetch and map parameter values from a strategy contract
  * @param {string} strategyAddress - The strategy contract address
- * @param {string} strategyId - Strategy ID (e.g., "parris", "fed")
+ * @param {string} strategyId - Strategy ID (e.g., "bob")
  * @param {string} vaultAddress - The vault address
  * @param {object} provider - Ethers provider
  * @returns {Promise<object>} Strategy parameters and metadata

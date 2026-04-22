@@ -38,37 +38,12 @@ const encodeBobParams = (params) => {
   );
 };
 
-// Helper to encode Parris strategy parameters as hex bytes
-const encodeParrisParams = (params) => {
-  return ethers.utils.defaultAbiCoder.encode(
-    [
-      'uint16', 'uint16', 'uint16', 'uint16', 'bool', 'uint256', 'uint16', 'uint16', 'uint16', 'uint16',
-      'bool', 'uint8', 'uint8', 'uint32', 'uint32', 'uint16', 'uint16', 'uint16', 'uint16', 'uint8',
-      'uint16', 'uint16', 'uint256', 'uint16', 'uint8', 'uint256'
-    ],
-    params
-  );
-};
-
-// Helper to encode Fed strategy parameters as hex bytes
-const encodeFedParams = (params) => {
-  const [targetRange, rebalanceThreshold, feeReinvestment, maxSlippage] = params;
-  return ethers.utils.defaultAbiCoder.encode(
-    ['uint16', 'uint16', 'bool', 'uint16'],
-    [targetRange, rebalanceThreshold, feeReinvestment, maxSlippage]
-  );
-};
-
-
-
 
 describe('Strategy Helpers', () => {
   describe('validateIdString', () => {
     describe('Success Cases', () => {
       it('should accept valid ID strings', () => {
         expect(() => validateIdString('bob')).not.toThrow();
-        expect(() => validateIdString('parris')).not.toThrow();
-        expect(() => validateIdString('fed')).not.toThrow();
         expect(() => validateIdString('none')).not.toThrow();
         expect(() => validateIdString('unknownStrategy')).not.toThrow();
       });
@@ -134,15 +109,13 @@ describe('Strategy Helpers', () => {
       // Should return an array
       expect(Array.isArray(result)).toBe(true);
 
-      // Should return exactly 4 strategies (none, bob, parris, fed)
-      expect(result).toHaveLength(4);
-      expect(result.sort()).toEqual(['bob', 'fed', 'none', 'parris']);
+      // Should return exactly 2 strategies (none, bob)
+      expect(result).toHaveLength(2);
+      expect(result.sort()).toEqual(['bob', 'none']);
 
       // Should include all strategy IDs (including "none" unlike lookupAvailableStrategies)
       expect(result).toContain('none');
       expect(result).toContain('bob');
-      expect(result).toContain('parris');
-      expect(result).toContain('fed');
 
       // All items should be strings
       result.forEach(id => {
@@ -156,22 +129,14 @@ describe('Strategy Helpers', () => {
     it('should return all strategies except "none" with correct structure', () => {
       const result = lookupAvailableStrategies();
 
-      // Should return exactly 3 strategies (bob, parris, fed)
-      expect(result).toHaveLength(3);
-      expect(result.map(s => s.id).sort()).toEqual(['bob', 'fed', 'parris']);
+      // Should return exactly 1 strategy (bob)
+      expect(result).toHaveLength(1);
+      expect(result.map(s => s.id).sort()).toEqual(['bob']);
 
       // Test specific strategy details
       const bob = result.find(s => s.id === 'bob');
       expect(bob.name).toBe('Baby Steps');
       expect(bob.subtitle).toBe('Baby Step into Liquidity Management');
-
-      const parris = result.find(s => s.id === 'parris');
-      expect(parris.name).toBe('Parris Island');
-      expect(parris.subtitle).toBe('Advanced Liquidity Management');
-
-      const fed = result.find(s => s.id === 'fed');
-      expect(fed.name).toBe('The Fed');
-      expect(fed.subtitle).toBe('Stablecoin Optimization');
 
       // Test structure - all should have required properties
       result.forEach(strategy => {
@@ -616,17 +581,6 @@ describe('Strategy Helpers', () => {
           }).not.toThrow();
         });
       });
-
-      it('should return fed strategy defaults', () => {
-        const result = getParamDefaultValues('fed');
-
-        // Fed strategy has different structure with fewer parameters
-        expect(Object.keys(result)).toHaveLength(4);
-        expect(result.targetRange).toBe(0.5);
-        expect(result.rebalanceThreshold).toBe(1.0);
-        expect(result.feeReinvestment).toBe(true);
-        expect(result.maxSlippage).toBe(0.5);
-      });
     });
 
     describe('Error Cases', () => {
@@ -807,38 +761,6 @@ describe('Strategy Helpers', () => {
         expect(Array.isArray(result)).toBe(false);
         expect(Object.keys(result)).toHaveLength(0);
       });
-
-      it('should work with parris strategy advanced group', () => {
-        const result = getStrategyParametersByGroup('parris', 3);
-
-        // Group 3 in parris strategy contains advanced parameters
-        const parameterKeys = Object.keys(result);
-        expect(parameterKeys.length).toBeGreaterThan(0);
-
-        // Should contain adaptive range parameters
-        expect(parameterKeys).toContain('adaptiveRanges');
-        expect(parameterKeys).toContain('oracleSource');
-        expect(parameterKeys).toContain('platformSelectionCriteria');
-
-        // All should belong to group 3
-        Object.values(result).forEach(param => {
-          expect(param.group).toBe(3);
-        });
-      });
-
-      it('should work with fed strategy parameters', () => {
-        const result = getStrategyParametersByGroup('fed', 0);
-
-        // Fed strategy group 0 has range parameters
-        const parameterKeys = Object.keys(result);
-        expect(parameterKeys).toContain('targetRange');
-        expect(parameterKeys).toContain('rebalanceThreshold');
-
-        Object.values(result).forEach(param => {
-          expect(param.group).toBe(0);
-        });
-      });
-
     });
 
     describe('Error Cases', () => {
@@ -952,73 +874,6 @@ describe('Strategy Helpers', () => {
         Object.values(result).forEach(param => {
           expect(param.contractGroup).toBe('risk');
         });
-      });
-
-      it('should work with parris strategy adaptive contract group', () => {
-        const result = getStrategyParametersByContractGroup('parris', 'adaptive');
-
-        // Adaptive contract group in parris strategy contains adaptive parameters
-        const parameterKeys = Object.keys(result);
-        expect(parameterKeys.length).toBeGreaterThan(0);
-
-        // Should contain adaptive range parameters
-        expect(parameterKeys).toContain('adaptiveRanges');
-        expect(parameterKeys).toContain('rebalanceCountThresholdHigh');
-        expect(parameterKeys).toContain('rebalanceCountThresholdLow');
-
-        // All should belong to adaptive contract group
-        Object.values(result).forEach(param => {
-          expect(param.contractGroup).toBe('adaptive');
-        });
-      });
-
-      it('should work with parris strategy oracle contract group', () => {
-        const result = getStrategyParametersByContractGroup('parris', 'oracle');
-
-        const parameterKeys = Object.keys(result);
-        expect(parameterKeys).toContain('oracleSource');
-        expect(parameterKeys).toContain('priceDeviationTolerance');
-
-        Object.values(result).forEach(param => {
-          expect(param.contractGroup).toBe('oracle');
-        });
-      });
-
-      it('should work with parris strategy positionSizing contract group', () => {
-        const result = getStrategyParametersByContractGroup('parris', 'positionSizing');
-
-        const parameterKeys = Object.keys(result);
-        expect(parameterKeys).toContain('maxPositionSizePercent');
-        expect(parameterKeys).toContain('minPositionSize');
-        expect(parameterKeys).toContain('targetUtilization');
-
-        Object.values(result).forEach(param => {
-          expect(param.contractGroup).toBe('positionSizing');
-        });
-      });
-
-      it('should work with parris strategy platform contract group', () => {
-        const result = getStrategyParametersByContractGroup('parris', 'platform');
-
-        const parameterKeys = Object.keys(result);
-        expect(parameterKeys).toContain('platformSelectionCriteria');
-        expect(parameterKeys).toContain('minPoolLiquidity');
-
-        Object.values(result).forEach(param => {
-          expect(param.contractGroup).toBe('platform');
-        });
-      });
-
-      it('should work with fed strategy contract groups', () => {
-        const rangeResult = getStrategyParametersByContractGroup('fed', 'range');
-        expect(Object.keys(rangeResult)).toContain('targetRange');
-        expect(Object.keys(rangeResult)).toContain('rebalanceThreshold');
-
-        const feeResult = getStrategyParametersByContractGroup('fed', 'fee');
-        expect(Object.keys(feeResult)).toContain('feeReinvestment');
-
-        const riskResult = getStrategyParametersByContractGroup('fed', 'risk');
-        expect(Object.keys(riskResult)).toContain('maxSlippage');
       });
 
       it('should return empty object for non-existent contract group', () => {
@@ -1154,41 +1009,6 @@ describe('Strategy Helpers', () => {
         expect(Object.keys(result.errors)).toHaveLength(0);
       });
 
-      it('should validate select parameters correctly', () => {
-        const params = {
-          targetRangeUpper: 5.0,
-          targetRangeLower: 5.0,
-          rebalanceThresholdUpper: 1.5,
-          rebalanceThresholdLower: 1.5,
-          maxVaultUtilization: 80,
-          adaptiveRanges: true,
-          rebalanceCountThresholdHigh: 3,
-          rebalanceCountThresholdLow: 1,
-          adaptiveTimeframeHigh: 7,
-          adaptiveTimeframeLow: 7,
-          rangeAdjustmentPercentHigh: 20,
-          thresholdAdjustmentPercentHigh: 15,
-          rangeAdjustmentPercentLow: 20,
-          thresholdAdjustmentPercentLow: 15,
-          maxSlippage: 0.5,
-          emergencyExitTrigger: 15,
-          oracleSource: "1", // Valid select option
-          priceDeviationTolerance: 1.0,
-          maxPositionSizePercent: 30,
-          minPositionSize: 100,
-          targetUtilization: 20,
-          feeReinvestment: true,
-          reinvestmentTrigger: 5000,
-          reinvestmentRatio: 80,
-          platformSelectionCriteria: "2", // Valid select option
-          minPoolLiquidity: 100000
-        };
-
-        const result = validateStrategyParams('parris', params);
-
-        expect(result.isValid).toBe(true);
-      });
-
       it('should handle empty params object', () => {
         const result = validateStrategyParams('bob', {});
 
@@ -1249,35 +1069,6 @@ describe('Strategy Helpers', () => {
         expect(result.isValid).toBe(false);
         expect(result.errors.targetRangeUpper).toContain('must be at most 20%');
         expect(result.errors.targetRangeLower).toContain('must be at least 0.1%');
-      });
-
-      it('should return errors for invalid select values', () => {
-        const params = {
-          targetRangeUpper: 5.0,
-          targetRangeLower: 5.0,
-          rebalanceThresholdUpper: 1.5,
-          rebalanceThresholdLower: 1.5,
-          maxVaultUtilization: 80,
-          adaptiveRanges: false,
-          maxSlippage: 0.5,
-          emergencyExitTrigger: 15,
-          oracleSource: "invalid", // Invalid select option
-          priceDeviationTolerance: 1.0,
-          maxPositionSizePercent: 30,
-          minPositionSize: 100,
-          targetUtilization: 20,
-          feeReinvestment: true,
-          reinvestmentTrigger: 5000,
-          reinvestmentRatio: 80,
-          platformSelectionCriteria: "999", // Invalid select option
-          minPoolLiquidity: 100000
-        };
-
-        const result = validateStrategyParams('parris', params);
-
-        expect(result.isValid).toBe(false);
-        expect(result.errors.oracleSource).toContain('must be one of the provided options');
-        expect(result.errors.platformSelectionCriteria).toContain('must be one of the provided options');
       });
 
       it('should validate conditional parameters when condition is met but values are invalid', () => {
@@ -1424,22 +1215,6 @@ describe('Strategy Helpers', () => {
         expect(getParameterSetterMethod('bob', 'range')).toBe('setRangeParameters');
         expect(getParameterSetterMethod('bob', 'fee')).toBe('setFeeParameters');
         expect(getParameterSetterMethod('bob', 'risk')).toBe('setRiskParameters');
-      });
-
-      it('should return setter methods for parris strategy contract groups', () => {
-        expect(getParameterSetterMethod('parris', 'range')).toBe('setRangeParameters');
-        expect(getParameterSetterMethod('parris', 'fee')).toBe('setFeeParameters');
-        expect(getParameterSetterMethod('parris', 'risk')).toBe('setRiskParameters');
-        expect(getParameterSetterMethod('parris', 'adaptive')).toBe('setAdaptiveParameters');
-        expect(getParameterSetterMethod('parris', 'oracle')).toBe('setOracleParameters');
-        expect(getParameterSetterMethod('parris', 'positionSizing')).toBe('setPositionSizingParameters');
-        expect(getParameterSetterMethod('parris', 'platform')).toBe('setPlatformParameters');
-      });
-
-      it('should return setter methods for fed strategy contract groups', () => {
-        expect(getParameterSetterMethod('fed', 'range')).toBe('setRangeParameters');
-        expect(getParameterSetterMethod('fed', 'fee')).toBe('setFeeParameters');
-        expect(getParameterSetterMethod('fed', 'risk')).toBe('setRiskParameters');
       });
 
       it('should throw error for non-existent contract group', () => {
@@ -1868,27 +1643,8 @@ describe('Strategy Helpers', () => {
         expect(allTokens).toHaveProperty('WETH');
       });
 
-      it('should return stablecoin tokens for strategy with tokenSupport "stablecoins"', () => {
-        const tokens = getStrategyTokens('fed');
-
-        expect(tokens).toBeDefined();
-        expect(typeof tokens).toBe('object');
-        expect(Array.isArray(tokens)).toBe(false);
-        expect(Object.keys(tokens).length).toBeGreaterThan(0);
-
-        // Should include stablecoins
-        expect(tokens).toHaveProperty('USDC');
-
-        // Should not include non-stablecoins like ETH (if it exists in all tokens)
-        const allTokens = getAllTokens();
-        if (allTokens.ETH && !tokens.ETH) {
-          // This confirms stablecoins are a subset
-          expect(Object.keys(tokens).length).toBeLessThan(Object.keys(allTokens).length);
-        }
-      });
-
       it('should work for all available strategies', () => {
-        const strategies = ['none', 'bob', 'parris', 'fed'];
+        const strategies = ['none', 'bob'];
 
         strategies.forEach(strategyId => {
           const tokens = getStrategyTokens(strategyId);
@@ -2243,22 +1999,6 @@ describe('Strategy Helpers', () => {
         expect(formatParameterValue(50, conditionalParam)).toBe('$50');
       });
 
-      it('should format parris strategy oracleSource parameter', () => {
-        const conditionalParam = {
-          type: 'select',
-          options: [
-            { value: '0', label: 'DEX Price' },
-            { value: '1', label: 'Chainlink' },
-            { value: '2', label: 'Time-Weighted Average Price' }
-          ]
-        };
-        expect(formatParameterValue('1', conditionalParam)).toBe('Chainlink');
-      });
-
-      it('should format parris strategy adaptiveTimeframeHigh parameter', () => {
-        const conditionalParam = { type: 'number', suffix: ' days' };
-        expect(formatParameterValue(7, conditionalParam)).toBe('7 days');
-      });
     });
   });
 
@@ -3109,58 +2849,6 @@ describe('Strategy Helpers', () => {
           expect(result.emergencyExitTrigger).toBe(10);
         });
       });
-
-      describe('Parris Strategy', () => {
-        it('should map Parris strategy parameters correctly', () => {
-          const rawParams = [
-            1000, 1000, 400, 400, true, 5000, 5000, 50, 1000, 9000,
-            false, 10, 5, 3600, 1800, 500, 300, 200, 100, 0,
-            1000, 2000, 5000000000000000000n, 8500, 1, 100000000000000000000n
-          ];
-          const rawBytes = encodeParrisParams(rawParams);
-          const result = mapStrategyParameters('parris', rawBytes);
-
-          expect(result.targetRangeUpper).toBe(10);
-          expect(result.adaptiveRanges).toBe(false);
-          expect(result.rebalanceCountThresholdHigh).toBe(10);
-          expect(result.oracleSource).toBe(0);
-          expect(result.maxPositionSizePercent).toBe(20);
-        });
-
-        it('should handle Parris strategy with adaptive ranges enabled', () => {
-          const rawParams = [
-            1000, 1000, 400, 400, true, 5000, 5000, 50, 1000, 9000,
-            true, 10, 5, 3600, 1800, 500, 300, 200, 100, 0,
-            1000, 2000, 5000000000000000000n, 8500, 1, 100000000000000000000n
-          ];
-          const rawBytes = encodeParrisParams(rawParams);
-          const result = mapStrategyParameters('parris', rawBytes);
-
-          expect(result.adaptiveRanges).toBe(true);
-        });
-      });
-
-      describe('Fed Strategy', () => {
-        it('should map Fed strategy parameters correctly', () => {
-          const rawBytes = encodeFedParams([500, 200, true, 100]);
-          const result = mapStrategyParameters('fed', rawBytes);
-
-          expect(result).toEqual({
-            targetRange: 5,
-            rebalanceThreshold: 2,
-            feeReinvestment: true,
-            maxSlippage: 1
-          });
-        });
-
-        it('should handle Fed strategy with false boolean parameter', () => {
-          const rawBytes = encodeFedParams([500, 200, false, 100]);
-          const result = mapStrategyParameters('fed', rawBytes);
-
-          expect(result.feeReinvestment).toBe(false);
-        });
-      });
-
     });
 
     describe('Error Cases', () => {

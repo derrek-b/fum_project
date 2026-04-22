@@ -59,7 +59,6 @@ Master orchestrator. Distributes contracts from `fum/contracts/` to all sibling 
 
 **TESTING_ONLY_CONTRACTS** (synced to fum_testing only, not extracted):
 - `StrategyBase`
-- `ParrisIslandStrategy`
 
 **TESTING_SUBDIRECTORIES** (entire directories synced to fum_testing):
 - `interfaces/`

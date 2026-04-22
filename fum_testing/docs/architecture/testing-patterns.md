@@ -191,7 +191,7 @@ Code samples below elide `await x.waitForDeployment();` after each `.deploy()` f
 
 ### Full Vault Setup (PositionVault.test.js pattern)
 
-Used by `PositionVault.test.js`. `TJPositionManager.test.js` uses a TJ-specific subset (see Trader Joe Extension). `BabyStepsStrategy.test.js`, `StrategyBase.test.js`, and `ParrisIslandStrategy.test.js` use a minimal Strategy-Only Setup (see below). Validator tests use a minimal Validator-Only Setup (see below).
+Used by `PositionVault.test.js`. `TJPositionManager.test.js` uses a TJ-specific subset (see Trader Joe Extension). `BabyStepsStrategy.test.js` and `StrategyBase.test.js` use a minimal Strategy-Only Setup (see below). Validator tests use a minimal Validator-Only Setup (see below).
 
 ```javascript
 // 1. Get signers
@@ -311,7 +311,7 @@ Validator tests use the signer's address as a stand-in for the vault address. Th
 
 ### Strategy-Only Minimal Setup
 
-Used by `StrategyBase.test.js`, `BabyStepsStrategy.test.js`, and `ParrisIslandStrategy.test.js`. These tests exercise only strategy logic routed through `vault.execute()`, so they skip `MockUniversalRouter`, `MockNonfungiblePositionManager`, and `MockPermit2`, and do not register validators:
+Used by `StrategyBase.test.js` and `BabyStepsStrategy.test.js`. These tests exercise only strategy logic routed through `vault.execute()`, so they skip `MockUniversalRouter`, `MockNonfungiblePositionManager`, and `MockPermit2`, and do not register validators:
 
 ```javascript
 // 1. Get signers

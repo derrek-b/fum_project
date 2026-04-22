@@ -882,10 +882,6 @@ class AutomationService {
       { log: (msg) => this.log(msg) }
     );
     this.log('Loaded bob strategy contract');
-
-    // Future: Load other strategy contracts as needed
-    // this.contracts.parrisStrategy = await getContract('parris', this.provider);
-    // this.contracts.fedStrategy = await getContract('fed', this.provider);
   }
 
   /**

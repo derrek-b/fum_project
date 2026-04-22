@@ -36,7 +36,7 @@ export function validateIdString(id) {
  * @example
  * // Lookup all strategy IDs
  * const ids = lookupAllStrategyIds();
- * // Returns: ['none', 'bob', 'parris', 'fed', ...]
+ * // Returns: ['none', 'bob']
  *
  * @example
  * // Check if strategy exists
@@ -89,7 +89,7 @@ export function lookupAvailableStrategies() {
 /**
  * Get details about a specific strategy
  * @memberof module:helpers/strategyHelpers
- * @param {string} strategyId - ID of the strategy to get details for (e.g., 'bob', 'parris')
+ * @param {string} strategyId - ID of the strategy to get details for (e.g., 'bob')
  * @returns {Object} Strategy details object with complete configuration
  * @throws {Error} Throws error if strategy not found
  * @example
@@ -747,11 +747,6 @@ export function shouldShowParameter(conditionalParam, testValueSet) {
  * // Note: WETH is filtered out - strategies use ETH, automation handles wrapping
  *
  * @example
- * // Get tokens for stablecoin-only strategy
- * const stableTokens = getStrategyTokens('fed');
- * // Returns: { USDC: { ... }, USDT: { ... }, DAI: { ... } }
- *
- * @example
  * // Get tokens for custom strategy
  * const customTokens = getStrategyTokens('customStrategy');
  * // Returns strategy's specific supportedTokens object
@@ -1073,7 +1068,7 @@ export function validatePositionsForStrategy (vaultPositions, pools, strategyTok
 /**
  * Map strategy parameters from contract return value to named objects
  * @memberof module:helpers/strategyHelpers
- * @param {string} strategyId - Strategy ID (e.g., 'bob', 'parris', 'fed')
+ * @param {string} strategyId - Strategy ID (e.g., 'bob')
  * @param {string} rawBytes - ABI-encoded bytes from contract getAllParameters call
  * @returns {Object} Named parameters with human-readable values
  * @throws {Error} If strategyId is invalid or rawBytes cannot be decoded
@@ -1134,79 +1129,6 @@ export function mapStrategyParameters(strategyId, rawBytes) {
         emergencyExitTrigger: parseInt(params[6]) / 100
       };
     }
-    else if (strategyIdLower === 'parris') {
-      // Decode bytes to typed values
-      // Note: OracleSource and PlatformSelectionCriteria enums are uint8 in Solidity
-      const params = ethers.utils.defaultAbiCoder.decode(
-        [
-          'uint16', 'uint16', 'uint16', 'uint16',           // Range params
-          'bool', 'uint256', 'uint16',                       // Fee settings
-          'uint16', 'uint16', 'uint16',                      // Risk management
-          'bool', 'uint8', 'uint8', 'uint16', 'uint16', 'uint16', 'uint16', 'uint16', 'uint16', // Adaptive
-          'uint8', 'uint16',                                 // Oracle (enum is uint8)
-          'uint16', 'uint256', 'uint16',                     // Position sizing
-          'uint8', 'uint256'                                 // Platform (enum is uint8)
-        ],
-        rawBytes
-      );
-
-      return {
-        // Range Parameters
-        targetRangeUpper: parseInt(params[0]) / 100, // Convert basis points to percent
-        targetRangeLower: parseInt(params[1]) / 100,
-        rebalanceThresholdUpper: parseInt(params[2]) / 100,
-        rebalanceThresholdLower: parseInt(params[3]) / 100,
-
-        // Fee Settings
-        feeReinvestment: params[4],
-        reinvestmentTrigger: ethers.utils.formatUnits(params[5], 2),
-        reinvestmentRatio: parseInt(params[6]) / 100,
-
-        // Risk Management
-        maxSlippage: parseInt(params[7]) / 100,
-        emergencyExitTrigger: parseInt(params[8]) / 100,
-        maxVaultUtilization: parseInt(params[9]) / 100,
-
-        // Adaptive Settings
-        adaptiveRanges: params[10],
-        rebalanceCountThresholdHigh: parseInt(params[11]),
-        rebalanceCountThresholdLow: parseInt(params[12]),
-        adaptiveTimeframeHigh: parseInt(params[13]),
-        adaptiveTimeframeLow: parseInt(params[14]),
-        rangeAdjustmentPercentHigh: parseInt(params[15]) / 100,
-        thresholdAdjustmentPercentHigh: parseInt(params[16]) / 100,
-        rangeAdjustmentPercentLow: parseInt(params[17]) / 100,
-        thresholdAdjustmentPercentLow: parseInt(params[18]) / 100,
-
-        // Oracle Settings
-        oracleSource: parseInt(params[19]),
-        priceDeviationTolerance: parseInt(params[20]) / 100,
-
-        // Position Sizing
-        maxPositionSizePercent: parseInt(params[21]) / 100,
-        minPositionSize: ethers.utils.formatUnits(params[22], 2),
-        targetUtilization: parseInt(params[23]) / 100,
-
-        // Platform Settings
-        platformSelectionCriteria: parseInt(params[24]),
-        minPoolLiquidity: ethers.utils.formatUnits(params[25], 2)
-      };
-    }
-    else if (strategyIdLower === 'fed') {
-      // Decode bytes to typed values
-      const params = ethers.utils.defaultAbiCoder.decode(
-        ['uint16', 'uint16', 'bool', 'uint16'],
-        rawBytes
-      );
-
-      return {
-        targetRange: parseInt(params[0]) / 100,
-        rebalanceThreshold: parseInt(params[1]) / 100,
-        feeReinvestment: params[2],
-        maxSlippage: parseInt(params[3]) / 100
-      };
-    }
-
     // If we reach here, we don't know how to map this strategy
     throw new Error(`No parameter mapping defined for strategy ${strategyId}`);
   } catch (error) {
