@@ -11,20 +11,20 @@ The adapter module provides a unified interface for interacting with different D
 |---|---|---|
 | `uniswapV3` | `UniswapV3Adapter` | Uniswap V3 (Arbitrum) |
 | `uniswapV4` | `UniswapV4Adapter` | Uniswap V4 (Arbitrum) |
-| `traderjoeV2_2` | `TraderJoeV2_2Adapter` | Trader Joe V2.2 Liquidity Book (Arbitrum, Avalanche) |
+| `traderjoeV2_2` | `TraderJoeV2_2Adapter` | Trader Joe V2.2 Liquidity Book (Avalanche) |
 
 ## AdapterFactory
 
-The factory creates adapter instances from platform IDs. Adapters are constructed with a `chainId` and `provider`, and they load platform-specific contract addresses, ABIs, and configuration from `configs/chains.js` and `configs/platforms.js` internally.
+The factory creates adapter instances from platform IDs. Adapters are constructed with a `chainId` only (provider is passed per-method call), and they load platform-specific contract addresses, ABIs, and configuration from `configs/chains.js` and `configs/platforms.js` internally.
 
 ```javascript
 import { AdapterFactory } from 'fum_library/adapters';
 
 // Get a specific adapter
-const adapter = AdapterFactory.getAdapter('uniswapV3', 42161, provider);
+const adapter = AdapterFactory.getAdapter('uniswapV3', 42161);
 
 // Get all adapters for a chain
-const { adapters, failures } = AdapterFactory.getAdaptersForChain(42161, provider);
+const { adapters, failures } = AdapterFactory.getAdaptersForChain(42161);
 
 // Check available platforms
 AdapterFactory.getSupportedPlatforms();  // ['uniswapV3', 'uniswapV4', 'traderjoeV2_2']
@@ -35,12 +35,13 @@ AdapterFactory.hasAdapter('uniswapV3'); // true
 
 | Method | Signature | Description |
 |---|---|---|
-| `getAdapter` | `(platformId, chainId, provider) → Adapter` | Create a specific adapter. Throws if platform unknown or creation fails. |
-| `getAdaptersForChain` | `(chainId, provider) → { adapters[], failures[] }` | Create all adapters for a chain. Returns failures array instead of throwing. |
+| `getAdapter` | `(platformId, chainId) → Adapter` | Create a specific adapter. Throws if platform unknown or creation fails. |
+| `getAdaptersForChain` | `(chainId) → { adapters[], failures[] }` | Create all adapters for a chain. Returns failures array instead of throwing. |
 | `getSupportedPlatforms` | `() → string[]` | List all registered platform IDs. |
 | `hasAdapter` | `(platformId) → boolean` | Check if a platform ID is registered. |
+| `registerAdapterForTestingOnly` | `(platformId, AdapterClass) → void` | Register an adapter class for testing or plugin scenarios (not persistent). |
 
-> **Note:** The convenience wrappers in `adapters/index.js` (`getAdaptersForChain`, `getAdapter`, `registerAdapter`) have stale signatures that pass an extra `config` parameter. Use `AdapterFactory` directly until these are fixed.
+> **Note:** `adapters/index.js` exposes convenience wrappers (`getAdaptersForChain`, `getAdapter`, `getSupportedPlatforms`) that forward to the matching `AdapterFactory` static methods. For test/plugin scenarios that need to register an adapter, call `AdapterFactory.registerAdapterForTestingOnly` directly — there is no convenience wrapper for it (intentional, to discourage non-test use).
 
 ## PlatformAdapter Interface
 
@@ -56,7 +57,7 @@ constructor(chainId, platformId, platformName)
 - `platformId` — string (e.g., `'uniswapV3'`)
 - `platformName` — string (e.g., `'Uniswap V3'`)
 
-Cannot be instantiated directly. Subclass constructors typically take `(chainId, provider)` and call `super(chainId, 'platformId', 'Platform Name')`.
+Cannot be instantiated directly. Subclass constructors take `(chainId)` and call `super(chainId, 'platformId', 'Platform Name')`. Providers are passed per-method call, not stored on the instance.
 
 ### Properties
 
@@ -70,7 +71,7 @@ Cannot be instantiated directly. Subclass constructors typically take `(chainId,
 
 | Method | Signature | Used By | Description |
 |---|---|---|---|
-| `getPositionsForDisplay` | `(address, provider) → Promise<{positions}>` | Frontend (all pages) | Get positions with pre-computed display values (prices, amounts, fees, in-range). See `docs/decisions/adapter-display-interface.md` |
+| `getPositionsForDisplay` | `(address, provider) → Promise<{positions}>` | Frontend (all pages) | Get positions with pre-computed display values (prices, amounts, fees, in-range). See [`docs/decisions/adapter-display-interface.md`](../../../../docs/decisions/adapter-display-interface.md) |
 | `refreshPositionForDisplay` | `(positionId, provider) → Promise<position>` | Frontend (modal refresh) | Single-position refresh returning same shape as `getPositionsForDisplay`. Used by `useModalData` hook for 30s auto-refresh while modals are open. |
 | `getPositionsForVDS` | `(address, provider) → Promise<{positions, poolData}>` | VDS.fetchPositions | Get positions formatted for VaultDataService cache |
 | `getPositionById` | `(tokenId, provider) → Promise<{position, poolData}>` | Strategy.createNewPosition | Fetch single position by NFT tokenId (no Graph dependency) |
@@ -337,10 +338,11 @@ This ensures swap quotes on the fork reflect the fork's pool state (including an
 import PlatformAdapter from './PlatformAdapter.js';
 
 export default class NewPlatformAdapter extends PlatformAdapter {
-  constructor(chainId, provider) {
+  constructor(chainId) {
     super(chainId, 'newPlatform', 'New Platform');
     // Load platform addresses from chain config
     // Cache ABIs and contract interfaces
+    // Providers are passed per-method call — don't store on the instance
   }
 
   // Implement all 29 required methods (27 automation + 2 display)...

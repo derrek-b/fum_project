@@ -152,13 +152,14 @@ if (!claim) {
   return;
 }
 
-// Build claim calldata for the Distributor contract
+// Build claim calldata for the Merkl Distributor contract.
+// Signature: claim(address user, address[] tokens, uint256[] amounts, bytes32[][] proofs)
 const distributorInterface = new ethers.utils.Interface([
-  'function claim(address[] users, address[] tokens, uint256[] amounts, bytes32[][] proofs)'
+  'function claim(address user, address[] tokens, uint256[] amounts, bytes32[][] proofs)'
 ]);
 
 const calldata = distributorInterface.encodeFunctionData('claim', [
-  claim.tokens.map(() => claim.user),  // one user per token
+  claim.user,
   claim.tokens,
   claim.amounts,
   claim.proofs
@@ -188,10 +189,7 @@ beforeEach(() => clearIncentiveCache());
 
 ## API Endpoints
 
-All requests go to Merkl v4:
-
-- **Opportunities** (pool campaigns): `https://api.merkl.xyz/v4/opportunities?chainId={chainId}&mainProtocolId=uniswap&type=UNISWAP_V4&campaigns=true`
-- **User rewards**: `https://api.merkl.xyz/v4/users/{userAddress}/rewards?chainId={chainId}`
+For Merkl endpoint URLs, raw response shapes, filter-param quirks, and Distributor contract addresses, see [docs/platform-knowledge/merkl-incentives.md](../../../../docs/platform-knowledge/merkl-incentives.md). This doc covers only the library's normalized surface — the platform-knowledge doc owns the upstream API contract.
 
 ## Why V4 Only
 

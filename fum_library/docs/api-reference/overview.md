@@ -15,24 +15,24 @@ Detailed API documentation for fum_library modules.
 
 ## Blockchain
 
-- [contracts.js](./blockchain/contracts.md) — getContract, getVaultFactory, createVault, getVaultContract, getUserVaults, getVaultInfo, executeVaultTransactions, getAuthorizedVaults, getContractInfoByAddress
-- [wallet.js](./blockchain/wallet.md) — createWeb3Provider, createJsonRpcProvider, getConnectedAccounts, requestWalletConnection, getChainId, switchChain
+- [contracts.js](./blockchain/contracts.md) — VaultFactory and PositionVault interactions. Top exports: `getContract`, `getVaultFactory`, `createVault`, `getVaultInfo`, `executeVaultTransactions`.
+- [wallet.js](./blockchain/wallet.md) — Provider creation and wallet connection. Top exports: `createWeb3Provider`, `createJsonRpcProvider`, `requestWalletConnection`, `switchChain`.
 
 ## Helpers
 
-- [chainHelpers](./helpers/chain-helpers.md) — getChainConfig, getChainRpcUrls, getPlatformAddresses, lookupChainPlatformIds, getExecutorXpub, getMinExecutorBalance, getMaxExecutorBalance, getMaxPriorityFeePerGas, getExpectedBlockMs, isLocalChain, and 8 others
-- [tokenHelpers](./helpers/token-helpers.md) — getTokenBySymbol, getTokenByAddress, getTokenAddress, getAllTokens, getCoingeckoId, isStablecoin, isNativeToken
-- [platformHelpers](./helpers/platform-helpers.md) — getPlatformMetadata, getPlatformFeeTiers, getAvailablePlatforms, lookupPlatformById
-- [strategyHelpers](./helpers/strategy-helpers.md) — lookupStrategyById, validateStrategyParams, getDefaultStrategyParams
-- [formatHelpers](./helpers/format-helpers.md) — formatPrice, formatFeeDisplay, formatTimestamp
-- [Permit2Helper](./helpers/permit2-helper.md) — getPermit2Nonce, generatePermit2Signature, wrapWithPermit2
+- [chainHelpers](./helpers/chain-helpers.md) — Chain config lookups, RPC URLs, platform addresses. Top exports: `getChainConfig`, `getChainRpcUrls`, `getPlatformAddresses`, `lookupChainPlatformIds`, `isChainSupported`.
+- [tokenHelpers](./helpers/token-helpers.md) — Token lookups by symbol/address, type checks. Top exports: `getTokenBySymbol`, `getTokenByAddress`, `getTokenAddress`, `getAllTokens`, `isStablecoin`.
+- [platformHelpers](./helpers/platform-helpers.md) — Platform metadata, fee tiers, tick bounds. Top exports: `getPlatformMetadata`, `getPlatformFeeTiers`, `getAvailablePlatforms`, `lookupPlatformById`.
+- [strategyHelpers](./helpers/strategy-helpers.md) — Strategy templates and parameter validation. Top exports: `getStrategyDetails`, `getStrategyTemplates`, `getStrategyParameters`, `validateStrategyParams`, `getParamDefaultValues`.
+- [formatHelpers](./helpers/format-helpers.md) — Display formatting. Top exports: `formatPrice`, `formatFeeDisplay`, `formatTimestamp`.
+- [Permit2Helper](./helpers/permit2-helper.md) — Permit2 nonce, signature, calldata wrapping. Top exports: `PERMIT2_ADDRESS`, `getPermit2Nonce`, `generatePermit2Signature`, `wrapWithPermit2`.
 
 ## Services
 
-- [coingecko](./services/coingecko.md) — fetchTokenPrices, CACHE_DURATIONS, buildApiUrl, clearPriceCache
-- [theGraph](./services/theGraph.md) — configureTheGraph, getPoolTVLAverage, getPoolAge, discoverV4Pools, getV4PositionsByOwner
-- [merkl](./services/merkl.md) — fetchPoolIncentives, fetchClaimData, clearIncentiveCache (V4 incentive source)
-- [blockExplorer](./services/blockExplorer.md) — getBlockExplorerService (internal-tx + native ETH tracking via Arbiscan / Etherscan V2)
+- [coingecko](./services/coingecko.md) — Token prices via CoinGecko with per-token caching. Top exports: `fetchTokenPrices`, `CACHE_DURATIONS`, `clearPriceCache`, `configureCoingecko`.
+- [theGraph](./services/theGraph.md) — Subgraph queries (TVL, pool age, V4 pool/position discovery). Top exports: `configureTheGraph`, `getPoolTVLAverage`, `discoverV4Pools`, `getV4PositionsByOwner`.
+- [merkl](./services/merkl.md) — V4 incentive campaigns from Merkl. Top exports: `fetchPoolIncentives`, `fetchClaimData`, `clearIncentiveCache`.
+- [blockExplorer](./services/blockExplorer.md) — Internal-tx and native ETH tracking via Arbiscan / Etherscan V2. Top exports: `getBlockExplorerService`.
 
 ## Configs
 

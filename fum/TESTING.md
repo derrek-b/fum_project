@@ -305,6 +305,8 @@ npm run contracts:test
 
 This syncs contracts to `fum_testing/` and runs Hardhat tests. See `fum_testing/` for test files.
 
+> **Coverage caveat:** `npm run contracts:test:coverage` reports a large share of false-negative gaps because `viaIR` + solidity-coverage 0.8.16 interact badly — many "uncovered" lines and branches are exercised by existing passing tests. Read [fum_testing/docs/architecture/coverage-quirks.md](../fum_testing/docs/architecture/coverage-quirks.md) before investing time in improving reported coverage.
+
 ## Troubleshooting
 
 ### Hardhat Issues

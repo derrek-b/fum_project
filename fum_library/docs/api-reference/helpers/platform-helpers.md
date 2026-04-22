@@ -5,504 +5,191 @@ Platform configuration utilities for managing DeFi protocol integrations and met
 
 ## Overview
 
-The Platform Helpers module provides comprehensive utilities for working with DeFi platforms (DEXs, lending protocols, etc.) in the FUM Library. It manages platform metadata, visual branding, chain-specific addresses, and feature configurations.
+The Platform Helpers module provides utilities for working with supported DeFi platforms (currently Uniswap V3, Uniswap V4, Trader Joe V2.2). It manages platform metadata, visual branding, fee tiers, tick configuration, and per-chain availability. All lookup functions use fail-fast validation — invalid inputs and missing data throw descriptive errors.
+
+## Exports
+
+```javascript
+import {
+  validatePlatformId,
+  getPlatformMetadata,
+  getPlatformName,
+  getPlatformColor,
+  getPlatformLogo,
+  lookupSupportedPlatformIds,
+  getPlatformFeeTiers,
+  getPlatformTickSpacing,
+  getPlatformTickBounds,
+  getAvailablePlatforms,
+  lookupPlatformById,
+} from 'fum_library/helpers/platformHelpers';
+```
 
 ## Functions
 
----
+### validatePlatformId
 
-## getPlatformMetadata
+Throws if `platformId` is missing, not a string, or empty. Used internally by every lookup function; exported for reuse by callers.
 
-Get platform metadata by ID.
-
-### Signature
 ```javascript
-getPlatformMetadata(platformId: string): Object | null
+validatePlatformId(platformId: any): void
 ```
 
-### Parameters
+---
 
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| platformId | `string` | Yes | - | The platform ID to look up (e.g., 'uniswapV3', 'aaveV3') |
+### getPlatformMetadata
 
-### Returns
+Return the raw platform config object from `configs/platforms.js`.
 
-`Object | null` - Platform metadata object containing name, logo, color, features - null if not found
+```javascript
+getPlatformMetadata(platformId: string): Object
+```
 
-### Return Object Structure
+Returns:
+
 ```javascript
 {
-  name: string,          // Human-readable platform name
-  logo: string,          // URL to platform logo
-  color: string,         // Primary brand color (hex)
-  description: string,   // Platform description
-  features: {            // Platform capabilities
-    concentrated?: boolean,
-    lending?: boolean,
-    // ... other features
-  },
-  feeTiers?: number[]    // Available fee tiers (for DEXs)
+  id: "uniswapV3",
+  name: "Uniswap V3",
+  logo: "/Platform_Logos/uniswap.svg",
+  color: "#FF007A",
+  description: "...",
+  features: { concentratedLiquidity: true, ... },
+  feeTiers: { 100: {...}, 500: {...}, 3000: {...}, 10000: {...} },
+  minTick: -887272,
+  maxTick: 887272,
+  subgraphs: { [chainId]: { id, queryType } }
 }
 ```
 
-### Examples
-
-```javascript
-// Get Uniswap V3 metadata
-const metadata = getPlatformMetadata('uniswapV3');
-// Returns: {
-//   name: "Uniswap V3",
-//   logo: "https://...",
-//   color: "#FF007A",
-//   description: "...",
-//   features: {...}
-// }
-
-// Handle unknown platform
-const platform = getPlatformMetadata('unknown');
-if (!platform) {
-  console.error('Platform not found');
-}
-```
-
-### Side Effects
-None - Pure function
+**Throws** if the platform is not configured.
 
 ---
 
-## getPlatformName
+### getPlatformName
 
-Get human-readable platform name by ID.
+Human-readable platform name.
 
-### Signature
 ```javascript
 getPlatformName(platformId: string): string
 ```
 
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| platformId | `string` | Yes | - | The platform ID to look up |
-
-### Returns
-
-`string` - Human-readable platform name or the ID itself if not found
-
-### Examples
-
-```javascript
-// Get known platform names
-getPlatformName('uniswapV3');    // "Uniswap V3"
-getPlatformName('aaveV3');       // "Aave V3"
-getPlatformName('compoundV3');   // "Compound V3"
-
-// Fallback for unknown platform
-getPlatformName('unknownPlatform'); // "unknownPlatform"
-```
-
-### Side Effects
-None - Pure function
+**Throws** if the platform is not supported or the `name` property is missing/empty.
 
 ---
 
-## getPlatformColor
+### getPlatformColor
 
-Get the primary brand color for a platform.
+Primary brand color (hex string).
 
-### Signature
 ```javascript
 getPlatformColor(platformId: string): string
 ```
 
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| platformId | `string` | Yes | - | The platform ID |
-
-### Returns
-
-`string` - Color hex code for UI theming - defaults to gray (#6c757d) if not defined
-
-### Examples
-
-```javascript
-// Get platform brand color
-const uniswapColor = getPlatformColor('uniswapV3'); // "#FF007A"
-
-// Use in component styling
-const platformStyle = {
-  backgroundColor: getPlatformColor(platformId),
-  borderColor: getPlatformColor(platformId)
-};
-
-// Default color for unknown platforms
-getPlatformColor('unknown'); // "#6c757d"
-```
-
-### Side Effects
-None - Pure function
+**Throws** if the platform is not supported or the `color` property is missing/empty.
 
 ---
 
-## getPlatformFeeTiers
+### getPlatformLogo
 
-Get fee tiers supported by a platform.
-
-### Signature
-```javascript
-getPlatformFeeTiers(platformId: string): Array<number>
-```
-
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| platformId | `string` | Yes | - | The platform ID to get fee tiers for |
-
-### Returns
-
-`Array<number>` - Array of supported fee tiers in basis points - empty array if platform not found
-
-### Examples
+Logo URL.
 
 ```javascript
-// Get Uniswap V3 fee tiers
-const feeTiers = getPlatformFeeTiers('uniswapV3');
-// Returns: [100, 500, 3000, 10000]
-
-// Build fee tier dropdown options
-const feeOptions = getPlatformFeeTiers(platformId).map(tier => ({
-  value: tier,
-  label: `${tier / 100}%`,
-  description: tier === 500 ? 'Most common' : tier === 3000 ? 'Standard' : ''
-}));
-
-// Automation service checking available pools
-const supportedFeeTiers = getPlatformFeeTiers('uniswapV3');
-for (const feeTier of supportedFeeTiers) {
-  const poolExists = await checkPoolExists(token0, token1, feeTier);
-  // Process pool...
-}
-
-// Handle unknown platform
-const feeTiers = getPlatformFeeTiers('unknownPlatform');
-// Returns: [] (empty array)
+getPlatformLogo(platformId: string): string
 ```
 
-### Use Cases
-
-- **Frontend**: Building fee tier dropdown menus for user strategy configuration
-- **Automation**: Discovering which fee tier pools exist for token pairs
-- **Analytics**: Understanding platform fee structure variations
-- **Validation**: Checking if user-selected fee tier is supported
-
-### Important Notes
-
-⚠️ **Fee Tier Format**: All fee tiers are returned in basis points (e.g., 500 = 0.05%, 3000 = 0.30%)
-
-### Side Effects
-None - Pure function
+**Throws** if the platform is not supported or the `logo` property is missing/empty.
 
 ---
 
-## getPlatformLogo
+### getPlatformFeeTiers
 
-Get platform logo URL.
-
-### Signature
-```javascript
-getPlatformLogo(platformId: string): string | null
-```
-
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| platformId | `string` | Yes | - | The platform ID |
-
-### Returns
-
-`string | null` - URL to platform logo image - null if not found
-
-### Examples
+Fee tiers supported by the platform, as an array of basis-point values.
 
 ```javascript
-// Get platform logo for display
-const logoUrl = getPlatformLogo('uniswapV3');
-if (logoUrl) {
-  return <img src={logoUrl} alt="Uniswap V3" />;
-}
-
-// Fallback to default logo
-const logo = getPlatformLogo(platformId) || '/images/default-platform.png';
+getPlatformFeeTiers(platformId: string): number[]
 ```
 
-### Side Effects
-None - Pure function
+Example: `getPlatformFeeTiers('uniswapV3')` → `[100, 500, 3000, 10000]`.
+
+**Throws** if the platform is not supported or `feeTiers` is not configured (e.g., Trader Joe V2.2, which uses per-pool `binStep` instead of fixed tiers).
 
 ---
 
-## getAvailablePlatforms
+### getPlatformTickSpacing
 
-Get all platforms available on a specific chain.
-
-### Signature
-```javascript
-getAvailablePlatforms(chainId: number): Array<Object>
-```
-
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| chainId | `number` | Yes | - | The current chain ID |
-
-### Returns
-
-`Array<Object>` - Array of platform objects with complete configuration for the chain
-
-### Return Array Item Structure
-```javascript
-{
-  id: string,                      // Platform identifier
-  name: string,                    // Human-readable name
-  factoryAddress: string,          // Factory contract address
-  positionManagerAddress: string,  // Position manager address
-  logo: string,                    // Logo URL
-  color: string,                   // Brand color (hex)
-  description: string              // Platform description
-}
-```
-
-### Examples
+Tick spacing for a given fee tier.
 
 ```javascript
-// Get all platforms on Ethereum mainnet
-const platforms = getAvailablePlatforms(1);
-// Returns: [
-//   {
-//     id: "uniswapV3",
-//     name: "Uniswap V3",
-//     factoryAddress: "0x1F98...",
-//     positionManagerAddress: "0xC365...",
-//     logo: "https://...",
-//     color: "#FF007A",
-//     description: "..."
-//   },
-//   ...
-// ]
-
-// Build platform selector
-const platformOptions = getAvailablePlatforms(chainId).map(platform => ({
-  value: platform.id,
-  label: platform.name,
-  icon: platform.logo
-}));
+getPlatformTickSpacing(platformId: string, fee: number): number
 ```
 
-### Important Notes
+Example: `getPlatformTickSpacing('uniswapV3', 500)` → `10`.
 
-⚠️ **WARNING**: This function only returns platforms that are enabled on the specified chain. Disabled platforms are filtered out.
-
-### Side Effects
-None - Pure function
+**Throws** if the platform is not configured, `feeTiers` is missing, or the fee tier is not defined.
 
 ---
 
-## lookupPlatformById
+### getPlatformTickBounds
 
-Get complete platform configuration for a specific chain.
+Platform-wide tick range limits.
 
-### Signature
+```javascript
+getPlatformTickBounds(platformId: string): { minTick: number, maxTick: number }
+```
+
+Example: `getPlatformTickBounds('uniswapV3')` → `{ minTick: -887272, maxTick: 887272 }`.
+
+**Throws** if the platform is not configured or the bounds are missing.
+
+---
+
+### lookupSupportedPlatformIds
+
+All configured platform IDs.
+
+```javascript
+lookupSupportedPlatformIds(): string[]
+```
+
+Returns e.g. `['uniswapV3', 'uniswapV4', 'traderjoeV2_2']`.
+
+---
+
+### getAvailablePlatforms
+
+All platforms enabled on a specific chain (combined metadata + chain addresses).
+
+```javascript
+getAvailablePlatforms(chainId: number): Object[]
+```
+
+Returns an array of platform objects that have addresses configured for the chain. Each object merges platform metadata with the chain's `platformAddresses[platformId]` contents.
+
+**Throws** via `validateChainId` for invalid chainIds, and if the chain has no `platformAddresses` configured.
+
+---
+
+### lookupPlatformById
+
+Combined metadata + chain addresses for a specific platform on a specific chain.
+
 ```javascript
 lookupPlatformById(platformId: string, chainId: number): Object | null
 ```
 
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| platformId | `string` | Yes | - | The platform ID to look up |
-| chainId | `number` | Yes | - | The current chain ID |
-
-### Returns
-
-`Object | null` - Combined platform configuration with metadata and addresses; `null` only when the platform is not configured on the chain. Throws for other invalid inputs.
-
-### Return Object Structure
-```javascript
-{
-  id: string,                      // Platform identifier
-  name: string,                    // Human-readable name
-  factoryAddress: string,          // Factory contract address
-  positionManagerAddress: string,  // Position manager address
-  routerAddress: string,           // Router contract address
-  quoterAddress: string,           // Quoter contract address
-  logo: string,                    // Logo URL
-  color: string,                   // Brand color (hex)
-  description: string,             // Platform description
-  features: Object,                // Feature flags
-  feeTiers: number[]               // Available fee tiers (basis points)
-}
-```
-
-### Examples
-
-```javascript
-// Get complete Uniswap V3 config for Arbitrum
-const uniswap = lookupPlatformById('uniswapV3', 42161);
-// Returns: {
-//   id: "uniswapV3",
-//   name: "Uniswap V3",
-//   factoryAddress: "0x1F98...",
-//   positionManagerAddress: "0xC365...",
-//   logo: "https://...",
-//   color: "#FF007A",
-//   description: "...",
-//   features: { concentrated: true, ... },
-//   feeTiers: [500, 3000, 10000]
-// }
-
-// Check platform availability before using (null = platform not on this chain)
-const platform = lookupPlatformById(platformId, chainId);
-if (!platform) {
-  throw new Error(`Platform ${platformId} not available on chain ${chainId}`);
-}
-```
-
-### Side Effects
-None - Pure function
+Returns `null` only when the platform is not configured on the chain (business-logic signal — use for conditional availability checks). **Throws** for other invalid inputs (unknown platform, missing metadata properties, chain not supported).
 
 ---
-
-## platformSupportsTokens
-
-Check if a platform supports specific tokens.
-
-### Signature
-```javascript
-platformSupportsTokens(platformId: string, tokenSymbols: string[], chainId: number): boolean
-```
-
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| platformId | `string` | Yes | - | The platform ID to check |
-| tokenSymbols | `string[]` | Yes | - | Array of token symbols to check |
-| chainId | `number` | Yes | - | The current chain ID |
-
-### Returns
-
-`boolean` - Whether the platform supports all specified tokens
-
-### Examples
-
-```javascript
-// Check if Uniswap V3 supports token pair
-const canTrade = platformSupportsTokens('uniswapV3', ['ETH', 'USDC'], 1);
-if (!canTrade) {
-  console.warn('Platform does not support this token pair');
-}
-
-// Filter platforms by token support
-const supportedPlatforms = getAvailablePlatforms(chainId)
-  .filter(platform => 
-    platformSupportsTokens(platform.id, selectedTokens, chainId)
-  );
-```
-
-### Important Notes
-
-⚠️ **TODO**: This is currently a placeholder implementation that always returns true. Platform-specific token support logic needs to be implemented.
-
-### Side Effects
-None - Pure function
-
----
-
-## lookupSupportedPlatformIds
-
-Get all configured platform IDs.
-
-### Signature
-```javascript
-lookupSupportedPlatformIds(): Array<string>
-```
-
-### Parameters
-
-None
-
-### Returns
-
-`Array<string>` - Array of all configured platform IDs
-
-### Examples
-
-```javascript
-// Get all platform IDs
-const platformIds = lookupSupportedPlatformIds();
-// Returns: ['uniswapV3', 'uniswapV4', 'traderjoeV2_2', ...]
-
-// Check if a platform is supported
-const supportedPlatforms = lookupSupportedPlatformIds();
-if (!supportedPlatforms.includes(userPlatform)) {
-  throw new Error('Unsupported platform');
-}
-```
-
-### Side Effects
-None - Pure function
-
----
-
-## Type Definitions
-
-```typescript
-// For TypeScript users
-interface PlatformMetadata {
-  name: string;
-  logo?: string;
-  color?: string;
-  description?: string;
-  features?: PlatformFeatures;
-  feeTiers?: number[];
-}
-
-interface PlatformFeatures {
-  concentrated?: boolean;
-  lending?: boolean;
-  staking?: boolean;
-  [key: string]: boolean | undefined;
-}
-
-interface PlatformConfig {
-  id: string;
-  name: string;
-  factoryAddress: string;
-  positionManagerAddress: string;
-  logo?: string;
-  color: string;
-  description: string;
-  features: PlatformFeatures;
-  feeTiers: number[];
-}
-
-type PlatformId = string;
-```
 
 ## Common Patterns
 
 ### Multi-Chain Platform Discovery
+
 ```javascript
 import { lookupSupportedChainIds, getChainName } from 'fum_library/helpers/chainHelpers';
 import { lookupPlatformById } from 'fum_library/helpers/platformHelpers';
 
-// Find which chains support a specific platform
 function getPlatformChains(platformId) {
   return lookupSupportedChainIds()
     .filter(chainId => lookupPlatformById(platformId, chainId) !== null)
@@ -514,43 +201,19 @@ function getPlatformChains(platformId) {
 }
 ```
 
-### Platform Feature Detection
-```javascript
-// Check platform capabilities
-function getPlatformCapabilities(platformId, chainId) {
-  const platform = lookupPlatformById(platformId, chainId);
-  if (!platform) return null;
-  
-  return {
-    hasConcentratedLiquidity: platform.features?.concentrated || false,
-    hasLending: platform.features?.lending || false,
-    hasMultipleFees: (platform.feeTiers?.length || 0) > 1,
-    supportedFeeTiers: platform.feeTiers || []
-  };
-}
-```
+### Platform Selector UI
 
-### Platform Selector Component Data
 ```javascript
-// Prepare data for platform selector UI
-function getPlatformSelectorData(chainId, selectedTokens) {
-  return getAvailablePlatforms(chainId)
-    .filter(platform => 
-      platformSupportsTokens(platform.id, selectedTokens, chainId)
-    )
-    .map(platform => ({
-      value: platform.id,
-      label: platform.name,
-      icon: platform.logo,
-      color: platform.color,
-      disabled: false
-    }));
-}
+const platformOptions = getAvailablePlatforms(chainId).map(platform => ({
+  value: platform.id,
+  label: platform.name,
+  icon: platform.logo,
+  color: platform.color
+}));
 ```
 
 ## See Also
 
-- [`chainHelpers`](./chain-helpers.md) - Chain configuration utilities
-- [`tokenHelpers`](./token-helpers.md) - Token management utilities
-- [DeFi Protocols](https://defillama.com/protocols) - Overview of DeFi platforms
-- [Uniswap V3 Docs](https://docs.uniswap.org/) - Example platform documentation
+- [`chainHelpers`](./chain-helpers.md) — Chain configuration utilities
+- [`tokenHelpers`](./token-helpers.md) — Token management utilities
+- [Adapters Architecture](../../architecture/adapters.md) — How adapters consume platform metadata

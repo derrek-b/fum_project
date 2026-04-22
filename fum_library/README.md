@@ -1,43 +1,18 @@
-# F.U.M. Library
-
-![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
-![License](https://img.shields.io/badge/license-Proprietary-red.svg)
-![Node](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen.svg)
-![Status](https://img.shields.io/badge/status-beta-yellow.svg)
+# FUM Library
 
 A comprehensive JavaScript library for DeFi liquidity management across multiple concentrated-liquidity protocols (Uniswap V3, Uniswap V4, Trader Joe V2.2) and automated strategy execution.
 
-## 📚 Documentation
+> `fum_library` is one subproject in the [fum_project monorepo](../README.md). The root README has the big-picture architecture and sibling-project overview; this doc covers `fum_library` specifically.
+
+## Documentation
 
 - **[Architecture Overview](./docs/architecture/overview.md)** - System design and module structure
 - **[API Reference](./docs/api-reference/overview.md)** - Complete API documentation
-- **[Module Reference](./docs/api-reference/modules.md)** - Detailed module documentation
 - **[Changelog](./CHANGELOG.md)** - Version history and updates
 
 ## Overview
 
-F.U.M. Library provides a modular toolkit for managing decentralized finance liquidity positions. It offers a standardized interface for interacting with multiple DeFi platforms and implements strategy execution for optimal liquidity management.
-
-## Core Concepts
-
-### Providers
-The library uses ethers.js providers for blockchain interaction. You can create providers for browser wallets or JSON-RPC endpoints.
-
-### Adapters
-Protocol adapters provide a unified interface for interacting with different DeFi protocols. Currently supported:
-- **Uniswap V3** (`UniswapV3Adapter`) — Arbitrum
-- **Uniswap V4** (`UniswapV4Adapter`) — Arbitrum
-- **Trader Joe V2.2 Liquidity Book** (`TraderJoeV2_2Adapter`) — Arbitrum, Avalanche
-
-### Vaults
-Vaults are smart contracts that hold user positions. The library can fetch and aggregate data from multiple vaults.
-
-### Positions
-Positions represent liquidity provided to DeFi protocols. Each position includes:
-- Token amounts
-- Current value
-- Uncollected fees
-- Pool information
+FUM Library provides a modular toolkit for managing decentralized finance liquidity positions. It offers a standardized interface for interacting with multiple DeFi platforms and implements strategy execution for optimal liquidity management.
 
 ## Features
 
@@ -46,13 +21,35 @@ Positions represent liquidity provided to DeFi protocols. Each position includes
 - **Vault Management**: Utilities for full lifecycle vault operations
 - **Token Helpers**: Functions for token listing, pricing, and conversions
 - **Blockchain Utilities**: Contract interaction and wallet connection helpers
-- **Price Oracles**: Integration with CoinGecko for token pricing
+- **External Service Integration**: CoinGecko (token prices), The Graph (subgraph queries), Merkl (V4 incentives), Arbiscan/Snowtrace (internal-tx tracking)
+
+## Supported Platforms
+
+| Adapter | Protocol | Chains |
+|---------|----------|--------|
+| `UniswapV3Adapter` | Uniswap V3 | Arbitrum |
+| `UniswapV4Adapter` | Uniswap V4 | Arbitrum |
+| `TraderJoeV2_2Adapter` | Trader Joe V2.2 Liquidity Book | Avalanche |
 
 ## Installation
 
-```bash
-npm install fum_library
+`fum_library` is a private monorepo package (`"private": true` in package.json) — it is **not published to npm** and cannot be installed with `npm install fum_library`. It is consumed only by sibling subprojects in the FUM monorepo (`fum`, `fum_automation`) via local tarball:
+
+```json
+// fum/package.json
+"dependencies": {
+  "fum_library": "file:../fum_library/fum_library-2.0.0.tgz"
+}
 ```
+
+To rebuild the tarball and reinstall it into both siblings after editing the library:
+
+```bash
+cd fum_library
+npm run pack   # builds, packs, and installs into fum and fum_automation
+```
+
+> **Never use `npm link`** — see [root README](../README.md) for the full monorepo convention and rationale.
 
 ## Usage
 
@@ -63,10 +60,18 @@ Before using API-dependent features, initialize the library with your API keys:
 ```javascript
 import { initFumLibrary } from 'fum_library';
 
-// Initialize with API keys (call once at app startup)
+// Initialize with API keys (call once at app startup).
+// Required:
+//   - alchemyApiKey:  required for production chains (Arbitrum, Avalanche). Not required for testing.
+//   - theGraphApiKey: subgraph queries (throws without)
+// Strongly recommended (technically optional, but unauthenticated rate limits may cause production/testing failures):
+//   - coingeckoApiKey
+//   - blockExplorerApiKey
 initFumLibrary({
   coingeckoApiKey: process.env.COINGECKO_API_KEY,
   alchemyApiKey: process.env.ALCHEMY_API_KEY,
+  blockExplorerApiKey: process.env.BLOCK_EXPLORER_API_KEY,
+  theGraphApiKey: process.env.THEGRAPH_API_KEY,
 });
 ```
 
@@ -98,11 +103,11 @@ import { UniswapV3Adapter, AdapterFactory } from 'fum_library/adapters';
 const adapter = new UniswapV3Adapter(chainId);
 
 // Or use the factory pattern
-const adapter = AdapterFactory.getAdapter(platformConfig, 'uniswap_v3', provider);
+const adapter = AdapterFactory.getAdapter('uniswapV3', chainId);
 
-// Get positions for an address
-const result = await adapter.getPositions(address, provider);
-console.log(result.positions); // Map of positions keyed by ID
+// Get positions for an address (automation use — for frontend, use getPositionsForDisplay)
+const result = await adapter.getPositionsForVDS(address, provider);
+console.log(result.positions); // Positions formatted for VaultDataService
 ```
 
 ### Helpers
@@ -194,11 +199,11 @@ console.log(prices.WETH); // Price in USD
 
 ## Strategy Support
 
-The library includes implementations and parameter validation for multiple liquidity provision strategies:
+The library currently includes one production strategy:
 
-- **Baby Steps Strategy** (`bob`): Simplified parameter set for beginner users
-- **Parris Island Strategy** (`parris`): Coming soon - Advanced adaptive range management with dynamic thresholds
-- **The Fed Strategy** (`fed`): Coming soon - Specialized stablecoin optimization
+- **Baby Steps Strategy** (`bob`): Conservative range-based automation with templates for common risk profiles (Conservative, Moderate, Aggressive, Stablecoin)
+
+Additional strategies can be added by extending `StrategyBase`.
 
 ## Development
 
@@ -210,47 +215,9 @@ npm install
 npm run build
 ```
 
-## 🏗️ Architecture
+## Architecture
 
-The library follows a modular architecture with clear separation of concerns:
-
-```
-┌─────────────────┐     ┌──────────────┐     ┌─────────────┐
-│   Adapters      │────▶│  Blockchain  │────▶│  Contracts  │
-└─────────────────┘     └──────────────┘     └─────────────┘
-        │                                              │
-        ▼                                              ▼
-┌─────────────────┐     ┌──────────────┐     ┌─────────────┐
-│    Helpers      │────▶│   Services   │────▶│   External  │
-└─────────────────┘     └──────────────┘     │     APIs    │
-                                              └─────────────┘
-```
-
-See [Architecture Overview](./docs/architecture/overview.md) for detailed system design and [interactive diagrams](./docs/diagrams/).
-
-## 📖 Documentation
-
-### Architecture Diagrams
-
-The library includes comprehensive architecture documentation in multiple formats:
-
-- **[Mermaid Diagrams](./docs/diagrams/mermaid/)** - Interactive diagrams (GitHub renders automatically)
-  - Module Dependencies
-  - Data Flow
-  - Component Interactions
-  - Sequence Diagrams
-- **[ASCII Diagrams](./docs/diagrams/ascii/)** - Text-based architecture views
-- **[PlantUML Diagrams](./docs/diagrams/plantuml/)** - Detailed UML diagrams
-- **[Draw.io Diagrams](./docs/diagrams/drawio/)** - Editable visual diagrams
-
-### Generating Documentation
-
-Documentation is automatically generated during the build process:
-
-```bash
-npm run build  # Builds code and generates docs
-npm run docs   # Generate documentation only
-```
+See [Architecture Overview](./docs/architecture/overview.md) for the full module breakdown, directory layout, and dependency graph.
 
 ## License
 

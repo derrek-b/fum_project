@@ -1,394 +1,181 @@
 <!-- Source: src/blockchain/wallet.js -->
 # Wallet API
 
-Ethereum wallet integration utilities for browser and RPC providers.
+Ethereum wallet and provider utilities for browser (MetaMask) and JSON-RPC contexts. Uses ethers.js **v5** (not v6) — providers live on `ethers.providers` (e.g., `ethers.providers.Web3Provider`).
 
 ## Overview
 
-The Wallet module provides utilities for creating and managing Ethereum providers, connecting to wallets, and handling chain operations. It supports both browser-based wallets (MetaMask, etc.) and JSON-RPC providers.
+The Wallet module exposes two provider constructors (`createWeb3Provider`, `createJsonRpcProvider`), account/connection helpers for browser wallets, and chain-switching utilities. Functions fail loudly on invalid inputs — no silent fallbacks.
+
+## Exports
+
+```javascript
+import {
+  createWeb3Provider,
+  createJsonRpcProvider,
+  getConnectedAccounts,
+  requestWalletConnection,
+  getChainId,
+  switchChain,
+} from 'fum_library/blockchain/wallet';
+```
+
+---
 
 ## Provider Creation
 
-### createBrowserProvider
+### createWeb3Provider
 
-Creates an ethers provider using the browser's Ethereum wallet.
+Creates an ethers v5 `Web3Provider` from `window.ethereum` (MetaMask, Coinbase Wallet, etc.). Browser-only.
 
-#### Signature
 ```javascript
-async createBrowserProvider(): Promise<ethers.BrowserProvider>
+async createWeb3Provider(): Promise<ethers.providers.Web3Provider>
 ```
 
-#### Returns
-
-`Promise<ethers.BrowserProvider>` - Configured ethers provider
-
-#### Throws
-
-| Error | Condition |
-|-------|-----------|
-| `Error` | No Ethereum provider found in browser |
-
-#### Example
+**Throws** `No Ethereum provider found (e.g., MetaMask) in browser` when `window.ethereum` is unavailable (non-browser environment or no wallet installed).
 
 ```javascript
-import { createBrowserProvider } from './blockchain/wallet.js';
-
 try {
-  const provider = await createBrowserProvider();
-  console.log('Connected to browser wallet');
+  const provider = await createWeb3Provider();
 } catch (error) {
-  console.error('MetaMask not installed');
+  console.error('No browser wallet detected');
 }
 ```
 
+---
+
 ### createJsonRpcProvider
 
-Creates an ethers provider using an RPC URL.
-
-#### Signature
-```javascript
-createJsonRpcProvider(rpcUrl: string): ethers.JsonRpcProvider
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| rpcUrl | `string` | Yes | The RPC endpoint URL |
-
-#### Returns
-
-`ethers.JsonRpcProvider` - Configured ethers provider
-
-#### Throws
-
-| Error | Condition |
-|-------|-----------|
-| `Error` | RPC URL is not provided |
-
-#### Example
+Creates an ethers v5 `JsonRpcProvider` for server-side or direct RPC use. Validates URL format (HTTP/HTTPS/WS/WSS) and tests connectivity with one automatic retry.
 
 ```javascript
-import { createJsonRpcProvider } from './blockchain/wallet.js';
-
-const provider = createJsonRpcProvider('https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY');
+async createJsonRpcProvider(rpcUrl: string): Promise<ethers.providers.JsonRpcProvider>
 ```
 
-### createProvider
-
-Creates an appropriate provider based on environment and parameters.
-
-#### Signature
-```javascript
-async createProvider(options?: Object): Promise<ethers.Provider>
-```
-
-#### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| options | `Object` | No | {} | Provider options |
-| options.rpcUrl | `string` | No | - | RPC URL for JsonRpcProvider |
-| options.preferBrowser | `boolean` | No | true | Whether to prefer browser wallet when available |
-
-#### Returns
-
-`Promise<ethers.Provider>` - The provider instance
-
-#### Throws
-
-| Error | Condition |
-|-------|-----------|
-| `Error` | No provider method available |
-
-#### Example
+**Throws:**
+- `RPC URL is required to create a provider` — missing URL
+- `Invalid RPC URL format: <url>. Must be a valid HTTP/HTTPS/WS/WSS URL.` — fails regex validation
+- `Provider connectivity test failed for <url>: <reason>` — `getNetwork()` fails after retry
 
 ```javascript
-// Prefer browser wallet, fallback to RPC
-const provider = await createProvider({
-  rpcUrl: 'https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY',
-  preferBrowser: true
-});
-
-// Force RPC provider
-const rpcProvider = await createProvider({
-  rpcUrl: 'https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY',
-  preferBrowser: false
-});
+const provider = await createJsonRpcProvider('https://arb-mainnet.g.alchemy.com/v2/<key>');
 ```
+
+---
 
 ## Wallet Operations
 
 ### getConnectedAccounts
 
-Gets the connected accounts from a browser wallet.
-
-#### Signature
-```javascript
-async getConnectedAccounts(provider: ethers.BrowserProvider): Promise<string[]>
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| provider | `ethers.BrowserProvider` | Yes | The ethers provider |
-
-#### Returns
-
-`Promise<string[]>` - Array of connected account addresses
-
-#### Throws
-
-| Error | Condition |
-|-------|-----------|
-| `Error` | Provider is required |
-| `Error` | Failed to get connected accounts |
-
-#### Example
+Returns currently-connected accounts from a browser provider, via `provider.listAccounts()`. Does **not** trigger a connection popup.
 
 ```javascript
-const provider = await createBrowserProvider();
-
-try {
-  const accounts = await getConnectedAccounts(provider);
-  
-  if (accounts.length > 0) {
-    console.log('Connected account:', accounts[0]);
-  } else {
-    console.log('No accounts connected');
-  }
-} catch (error) {
-  console.error('Failed to get connected accounts:', error.message);
-  // Handle wallet connection errors appropriately
-}
+async getConnectedAccounts(
+  provider: ethers.providers.Provider
+): Promise<string[]>
 ```
+
+**Throws** if the provider is missing or not an ethers provider, or if `listAccounts()` fails.
+
+---
 
 ### requestWalletConnection
 
-Requests wallet connection (triggers wallet popup).
-
-#### Signature
-```javascript
-async requestWalletConnection(provider: ethers.BrowserProvider): Promise<string[]>
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| provider | `ethers.BrowserProvider` | Yes | The ethers provider |
-
-#### Returns
-
-`Promise<string[]>` - Array of connected account addresses
-
-#### Throws
-
-| Error | Condition |
-|-------|-----------|
-| `Error` | Failed to connect to wallet |
-
-#### Example
+Triggers the wallet connection popup via `eth_requestAccounts`. Requires a browser (Web3) provider — explicitly rejects `JsonRpcProvider`.
 
 ```javascript
-const provider = await createBrowserProvider();
-
-try {
-  const accounts = await requestWalletConnection(provider);
-  console.log('Connected accounts:', accounts);
-} catch (error) {
-  console.error('User rejected connection');
-}
+async requestWalletConnection(
+  provider: ethers.providers.Web3Provider
+): Promise<string[]>
 ```
+
+**Throws:**
+- `A browser provider is required to request wallet connection` — called with a `JsonRpcProvider`
+- `Failed to connect to wallet: <reason>` — user rejection or wallet error
+
+---
 
 ## Chain Operations
 
 ### getChainId
 
-Gets the chain ID from the provider.
-
-#### Signature
-```javascript
-async getChainId(provider: ethers.Provider): Promise<number>
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| provider | `ethers.Provider` | Yes | The ethers provider |
-
-#### Returns
-
-`Promise<number>` - The chain ID
-
-#### Example
+Reads the chain ID from the provider's network.
 
 ```javascript
-const chainId = await getChainId(provider);
-console.log('Connected to chain:', chainId);
-// 1 for Ethereum mainnet, 137 for Polygon, etc.
+async getChainId(provider: ethers.providers.Provider): Promise<number>
 ```
+
+**Throws** if the provider is missing or invalid, or if `getNetwork()` fails.
+
+---
 
 ### switchChain
 
-Switches the connected wallet to a specific chain.
+Switches the connected browser wallet to the given chain. If the chain isn't added to the wallet (error code `4902`), attempts to add it using the library's chain config via `getChainConfig(chainId)`. Returns `true` on success, `false` on failure. Requires a browser provider.
 
-#### Signature
 ```javascript
-async switchChain(provider: ethers.BrowserProvider, chainId: number | string): Promise<boolean>
+async switchChain(
+  provider: ethers.providers.Web3Provider,
+  chainId: number
+): Promise<boolean>
 ```
 
-#### Parameters
+**Throws:**
+- `A browser provider is required to switch chains` — called with a `JsonRpcProvider`
+- `Chain ID must be a number` — non-number `chainId`
 
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| provider | `ethers.BrowserProvider` | Yes | The ethers provider |
-| chainId | `number \| string` | Yes | The chain ID to switch to |
-
-#### Returns
-
-`Promise<boolean>` - Whether the switch was successful
-
-#### Example
+On failure after retries the function returns `false` rather than throwing (so callers can distinguish "user refused/chain not in configs" from programming errors).
 
 ```javascript
-const provider = await createBrowserProvider();
-
-// Switch to Polygon (chain ID 137)
-const success = await switchChain(provider, 137);
-
-if (success) {
-  console.log('Switched to Polygon');
-} else {
-  console.log('Failed to switch chain');
+const success = await switchChain(provider, 42161); // Arbitrum
+if (!success) {
+  console.warn('User rejected chain switch or chain not configured');
 }
-
-// Using hex format
-await switchChain(provider, '0x89'); // Also switches to Polygon
 ```
+
+---
 
 ## Common Patterns
 
-### Complete Wallet Connection Flow
+### Full Browser Connection Flow
 
 ```javascript
-import * as wallet from './blockchain/wallet.js';
+import {
+  createWeb3Provider,
+  requestWalletConnection,
+  getChainId,
+  switchChain,
+} from 'fum_library/blockchain/wallet';
 
-async function connectWallet() {
-  try {
-    // Create browser provider
-    const provider = await wallet.createBrowserProvider();
-    
-    // Request connection
-    const accounts = await wallet.requestWalletConnection(provider);
-    
-    if (accounts.length === 0) {
-      throw new Error('No accounts connected');
-    }
-    
-    // Get current chain
-    const chainId = await wallet.getChainId(provider);
-    
-    // Switch to desired chain if needed
-    if (chainId !== 1) {
-      await wallet.switchChain(provider, 1);
-    }
-    
-    // Get signer for transactions
-    const signer = await provider.getSigner();
-    
-    return { provider, signer, address: accounts[0] };
-  } catch (error) {
-    console.error('Wallet connection failed:', error);
-    throw error;
+async function connectWallet(targetChainId = 42161) {
+  const provider = await createWeb3Provider();
+  const accounts = await requestWalletConnection(provider);
+  if (accounts.length === 0) throw new Error('No accounts connected');
+
+  const chainId = await getChainId(provider);
+  if (chainId !== targetChainId) {
+    const switched = await switchChain(provider, targetChainId);
+    if (!switched) throw new Error(`Failed to switch to chain ${targetChainId}`);
   }
+
+  const signer = provider.getSigner();
+  return { provider, signer, address: accounts[0] };
 }
 ```
 
-### Multi-Provider Support
+### Server-Side RPC Provider
 
 ```javascript
-async function getProvider(config) {
-  try {
-    // Try browser wallet first
-    return await wallet.createBrowserProvider();
-  } catch (error) {
-    // Fallback to RPC
-    if (config.rpcUrl) {
-      console.log('Using RPC provider as fallback');
-      return wallet.createJsonRpcProvider(config.rpcUrl);
-    }
-    throw error;
-  }
-}
+import { createJsonRpcProvider } from 'fum_library/blockchain/wallet';
+import { getChainRpcUrls } from 'fum_library/helpers/chainHelpers';
+
+const [rpcUrl] = getChainRpcUrls(42161);
+const provider = await createJsonRpcProvider(rpcUrl);
 ```
-
-### Chain Detection and Switching
-
-```javascript
-async function ensureCorrectChain(provider, targetChainId) {
-  const currentChainId = await wallet.getChainId(provider);
-  
-  if (currentChainId !== targetChainId) {
-    console.log(`Switching from chain ${currentChainId} to ${targetChainId}`);
-    
-    const success = await wallet.switchChain(provider, targetChainId);
-    
-    if (!success) {
-      throw new Error(`Failed to switch to chain ${targetChainId}`);
-    }
-  }
-  
-  return true;
-}
-```
-
-## Error Handling
-
-```javascript
-async function safeWalletConnect() {
-  try {
-    const provider = await wallet.createProvider({
-      rpcUrl: process.env.FALLBACK_RPC_URL
-    });
-    
-    if (provider instanceof ethers.BrowserProvider) {
-      // Browser wallet specific operations
-      const accounts = await wallet.requestWalletConnection(provider);
-      return { provider, accounts };
-    } else {
-      // RPC provider - no wallet connection needed
-      return { provider, accounts: [] };
-    }
-  } catch (error) {
-    if (error.message.includes('No Ethereum provider')) {
-      console.error('Please install MetaMask');
-    } else if (error.message.includes('Failed to get connected accounts')) {
-      console.error('Wallet connection issue - check wallet state');
-    } else if (error.code === 4001) {
-      console.error('User rejected connection');
-    } else if (error.code === 4902) {
-      console.error('Chain not added to wallet');
-    } else {
-      console.error('Unexpected error:', error);
-    }
-    throw error;
-  }
-}
-```
-
-## Best Practices
-
-1. **Error Handling**: Always handle wallet connection rejections gracefully
-2. **Chain Validation**: Verify the correct chain before transactions
-3. **Provider Fallbacks**: Implement RPC fallbacks for better reliability
-4. **User Experience**: Provide clear feedback during wallet operations
-5. **Security**: Never store private keys; always use wallet providers
 
 ## See Also
 
-- [`contracts`](./contracts.md) - Contract interaction utilities
-- [ethers.js Documentation](https://docs.ethers.org/v6/)
+- [`contracts`](./contracts.md) — Contract interaction utilities
+- [`chainHelpers`](../helpers/chain-helpers.md) — Chain configuration (used by `switchChain`)
+- [ethers.js v5 Docs](https://docs.ethers.org/v5/)
 - [EIP-1193: Ethereum Provider JavaScript API](https://eips.ethereum.org/EIPS/eip-1193)

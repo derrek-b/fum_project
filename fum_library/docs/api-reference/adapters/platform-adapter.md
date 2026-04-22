@@ -31,13 +31,13 @@ constructor(chainId, platformId, platformName)
 - `Error` if `chainId` is not a valid number
 - `Error` if `platformId` or `platformName` is missing
 
-Subclass constructors typically take `(chainId, provider)` and call `super()` with the platform identifiers:
+Subclass constructors take `(chainId)` and call `super()` with the platform identifiers. Providers are passed per-method call, not stored on the instance:
 
 ```javascript
 class MyAdapter extends PlatformAdapter {
-  constructor(chainId, provider) {
+  constructor(chainId) {
     super(chainId, 'myPlatform', 'My Platform');
-    this.provider = provider;
+    // Cache platform addresses, ABIs, etc. from chainId-derived config
   }
 }
 ```
@@ -49,6 +49,7 @@ class MyAdapter extends PlatformAdapter {
 | `this.chainId` | `number` | Constructor |
 | `this.platformId` | `string` | Constructor |
 | `this.platformName` | `string` | Constructor |
+| `this.supportsNativePools` | `boolean` | Constructor (defaults to `false`; subclasses override when the platform has native-token pools, e.g. V4 ETH pools) |
 
 ---
 
@@ -475,11 +476,11 @@ Calculate percentage price movement between current swap state and a stored base
 
 These have safe default no-op implementations. Override to enable incentive support.
 
-#### getPoolIncentives(poolAddress, provider)
+#### getPoolIncentives(poolAddress, poolData, provider)
 
 **Default:** `{ active: false, programs: [] }`
 
-**Returns:** `Promise<{ active: boolean, programs: Array<{ rewardToken, rewardTokenSymbol?, endTime }> }>`
+**Returns:** `Promise<{ active: boolean, programs: Array<{ rewardToken, rewardTokenSymbol?, endTimestamp }> }>`
 
 ---
 
@@ -499,7 +500,7 @@ These have safe default no-op implementations. Override to enable incentive supp
 
 ---
 
-#### getIncentiveClaimTransactions(vaultAddress, poolAddress, provider)
+#### getIncentiveClaimTransactions(vaultAddress, poolAddress, poolData, provider)
 
 **Default:** `[]`
 

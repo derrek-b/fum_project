@@ -1,278 +1,143 @@
 <!-- Source: src/adapters/UniswapV3Adapter.js -->
 # UniswapV3Adapter
 
-The Uniswap V3 protocol adapter for concentrated liquidity pool integration.
+The Uniswap V3 protocol adapter for concentrated-liquidity pool integration.
 
 ## Overview
 
-This adapter provides comprehensive integration with Uniswap V3 concentrated liquidity pools including:
-- Pool and position data fetching
-- Price calculations and tick conversions
-- Transaction data generation for swaps, liquidity management, and fee collection
-- Optimal routing via AlphaRouter integration
+This adapter implements all 29 required `PlatformAdapter` methods (27 automation + 2 frontend display) for Uniswap V3. It handles pool/position data fetching, tick and price math, transaction encoding for swaps and liquidity operations, and optimal routing via `AlphaRouter`. Most internal helpers are underscore-prefixed (`_getPoolAddress`, `_fetchPoolData`, `_getSwapRoute`, etc.); only the methods listed below are part of the public surface.
 
-The adapter is designed for single-chain operation and caches configuration data during construction for optimal performance.
+The adapter is single-chain: construct one per chain. All configuration (platform addresses, fee tiers, tick bounds, ABIs, AlphaRouter) is cached during construction.
 
-> This doc covers V3-specific methods beyond the base class interface. For the full `PlatformAdapter` interface (27 required + 4 optional methods), see [PlatformAdapter API Reference](./platform-adapter.md).
+> For the full `PlatformAdapter` interface, see [PlatformAdapter API Reference](./platform-adapter.md). This doc covers V3-specific behavior, V3-only public methods, and tick/price conventions.
 
 ## Constructor
 
 ```javascript
 import { UniswapV3Adapter } from 'fum_library/adapters';
 
-const adapter = new UniswapV3Adapter(chainId, provider);
+const adapter = new UniswapV3Adapter(chainId);
 ```
 
 ### Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `chainId` | `number` | Chain ID for the adapter (e.g., 42161 for Arbitrum) |
-| `provider` | `ethers.Provider` | Ethers provider instance |
+| `chainId` | `number` | Chain ID for the adapter (e.g., `42161` for Arbitrum, `1337` for Hardhat Arbitrum fork) |
+
+> The constructor takes only `chainId`. Providers are passed per-method call.
 
 ### Cached Configuration
 
 The constructor caches:
-- Platform contract addresses (factory, position manager, router, quoter)
-- Supported fee tiers (100, 500, 3000, 10000)
-- Chain configuration
-- Pre-compiled contract interfaces for transaction encoding
-- AlphaRouter instance for optimal swap routing
-
----
-
-## Pool Methods
-
-### getPoolAddress
-
-Get pool address from the factory contract.
-
-```javascript
-const poolAddress = await adapter.getPoolAddress(
-  token0Address,
-  token1Address,
-  fee,
-  provider
-);
-```
-
-#### Parameters
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `token0Address` | `string` | Address of first token |
-| `token1Address` | `string` | Address of second token |
-| `fee` | `number` | Fee tier (100, 500, 3000, or 10000) |
-| `provider` | `ethers.Provider` | Ethers provider instance |
-
-#### Returns
-
-`Promise<string>` - Pool contract address (or zero address if pool doesn't exist).
-
----
-
-### checkPoolExists
-
-Check if a pool exists for the given tokens and fee tier.
-
-```javascript
-const result = await adapter.checkPoolExists(token0, token1, fee, provider);
-
-if (result.exists) {
-  console.log('Pool address:', result.poolAddress);
-  console.log('Current tick:', result.slot0.tick);
-}
-```
-
-#### Parameters
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `token0` | `Object` | Token object with `address` and `decimals` |
-| `token1` | `Object` | Token object with `address` and `decimals` |
-| `fee` | `number` | Fee tier |
-| `provider` | `ethers.Provider` | Ethers provider instance |
-
-#### Returns
-
-`Promise<Object>`:
-- `exists: boolean` - Whether pool exists
-- `poolAddress: string|null` - Pool address if exists
-- `slot0: Object|null` - Pool slot0 data if exists
-
----
-
-### fetchPoolData
-
-Fetch comprehensive pool state data by token addresses.
-
-```javascript
-const poolData = await adapter.fetchPoolData(
-  token0Address,
-  token1Address,
-  fee,
-  provider
-);
-```
-
-#### Returns
-
-`Promise<Object>` containing:
-- `poolAddress: string`
-- `token0: Object` - Token0 data with address, decimals, symbol
-- `token1: Object` - Token1 data with address, decimals, symbol
-- `sqrtPriceX96: string` - Current sqrt price
-- `tick: number` - Current tick
-- `liquidity: string` - Pool liquidity
-- `feeGrowthGlobal0X128: string` - Global fee growth for token0
-- `feeGrowthGlobal1X128: string` - Global fee growth for token1
-- `fee: number` - Fee tier
-- `tickSpacing: number` - Tick spacing for this pool
-- `ticks: Object` - Tick data (populated by fetchTickData)
-
----
-
-### getPoolData
-
-Get core pool state data by address. Implements the `PlatformAdapter` interface method.
-
-```javascript
-const poolData = await adapter.getPoolData(poolAddress, provider);
-```
-
-#### Parameters
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `poolAddress` | `string` | Pool contract address |
-| `provider` | `ethers.Provider` | Ethers provider instance |
-
-#### Returns
-
-`Promise<Object>`:
-- `address: string` — Checksummed pool address
-- `sqrtPriceX96: string` — Current sqrt price (Q64.96)
-- `tick: number` — Current tick
-- `liquidity: string` — Active in-range liquidity
-- `fee: number` — Fee tier (basis points)
-- `feeGrowthGlobal0X128: string` — Global fee growth for token0
-- `feeGrowthGlobal1X128: string` — Global fee growth for token1
-- `observationIndex: number` — Oracle observation index
-- `observationCardinality: number` — Oracle cardinality
-- `observationCardinalityNext: number` — Oracle cardinality target
-- `feeProtocol: number` — Protocol fee
-- `unlocked: boolean` — Reentrancy guard state
-- `lastUpdated: number` — Timestamp of fetch (ms)
-
----
-
-### fetchTickData
-
-Fetch tick-specific data for fee calculations.
-
-```javascript
-const tickData = await adapter.fetchTickData(
-  poolAddress,
-  tickLower,
-  tickUpper,
-  provider
-);
-```
-
-#### Returns
-
-`Promise<Object>`:
-- `tickLower: Object` - Lower tick data with fee growth values
-- `tickUpper: Object` - Upper tick data with fee growth values
-
----
-
-### getCurrentTick
-
-Get the current tick for a pool.
-
-```javascript
-const currentTick = await adapter.getCurrentTick(poolAddress, provider);
-```
-
----
-
-### discoverAvailablePools
-
-Discover available pools for a token pair across all fee tiers.
-
-```javascript
-const pools = await adapter.discoverAvailablePools(
-  token0Address,
-  token1Address,
-  provider
-);
-
-// Returns array of pool objects with address, fee, liquidity, sqrtPriceX96, tick
-```
-
----
-
-### getPoolABI
-
-Get the Uniswap V3 pool contract ABI.
-
-```javascript
-const poolABI = adapter.getPoolABI();
-```
-
----
-
-## Position Methods
-
-### getPositions
-
-Get all Uniswap V3 positions for a wallet address.
-
-```javascript
-const { positions, poolData } = await adapter.getPositions(address, provider);
-
-// positions: Object keyed by position ID
-// poolData: Object keyed by pool address with full pool state
-```
-
----
-
-### getPositionsForVDS
-
-Get positions formatted for VaultDataService (pared down to essential fields).
-
-```javascript
-const { positions, poolData } = await adapter.getPositionsForVDS(
-  vaultAddress,
-  provider
-);
-
-// positions: Normalized position data (id, pool, tickLower, tickUpper, liquidity)
-// poolData: Stable metadata only (no time-sensitive data)
-```
-
----
-
-### isPositionInRange
+- Platform contract addresses (`factoryAddress`, `positionManagerAddress`, `routerAddress`, `universalRouterAddress`, `quoterAddress`) from chain config
+- Supported fee tiers (`100`, `500`, `3000`, `10000`) with tick spacings
+- Platform tick bounds (`minTick`/`maxTick`)
+- Pre-compiled `ethers.utils.Interface` instances for each contract ABI
+- An `AlphaRouter` instance for optimal swap routing (with fork-specific overrides when `chainId === 1337`)
+
+### Instance Properties
+
+| Property | Type | Value |
+|---|---|---|
+| `chainId` | `number` | From constructor |
+| `platformId` | `string` | `'uniswapV3'` |
+| `platformName` | `string` | `'Uniswap V3'` |
+| `supportsNativePools` | `boolean` | `true` (inherited override — V3 pools can use native ETH flows via the Universal Router) |
+
+### Hardhat Fork Handling
+
+When `chainId === 1337`, the constructor configures `AlphaRouter` with:
+- `localRpcUrl = http://localhost:8545` (from `getChainRpcUrls(1337)`)
+- `alphaRouterChainId = 42161` so Uniswap contract addresses resolve correctly
+- `StaticV3SubgraphProvider` for on-chain pool discovery (no mainnet subgraph dependency)
+- `StaticGasPriceProvider` with a fixed gas price (avoids calling `ArbGasInfo`)
+- Stubbed `arbitrumGasDataProvider` to avoid division-by-zero in the AlphaRouter gas model
+
+## Required Methods
+
+All 29 required `PlatformAdapter` methods are implemented. See [PlatformAdapter API Reference](./platform-adapter.md) for signatures, parameters, and return shapes. V3-specific notes:
+
+### Position Discovery & Data
+
+| Method | V3 Notes |
+|---|---|
+| `getPositionsForVDS(address, provider)` | Enumerates positions via `NonfungiblePositionManager.balanceOf` + `tokenOfOwnerByIndex`, filters out positions with zero liquidity, and groups by pool for efficient tick data fetches. |
+| `getPositionsForDisplay(ownerAddress, provider)` | Returns display-ready shape (prices, formatted amounts, in-range booleans) for the frontend. |
+| `refreshPositionForDisplay(positionId, provider)` | Single-position refresh. Throws if position has zero liquidity or has been burned. |
+| `getPositionById(tokenId, provider)` | Queries `NonfungiblePositionManager.positions(tokenId)` directly (no subgraph). Returns position + pool metadata. |
+| `getPoolData(poolAddress, provider)` | Queries the pool's `slot0()`, `liquidity()`, `feeGrowthGlobal0X128()`, `feeGrowthGlobal1X128()`, plus the full `slot0` tuple (observation index/cardinality, feeProtocol, unlocked). |
+| `calculateTokenAmounts(position, poolData, token0Data, token1Data, provider)` | Uses the V3 SDK's `Position` class with `SqrtPriceMath`/`TickMath` to compute amounts at current price. |
+
+### Position Evaluation
+
+| Method | V3 Notes |
+|---|---|
+| `evaluatePositionRange(position, provider, options?)` | Tick-based range check. Fast path via `options.swapData.tick` bypasses RPC. |
+| `getAccruedFeesUSD(position, tokenPrices, provider)` | Fetches per-tick `feeGrowthOutside` values and computes fees using standard V3 formula. |
+| `extractPositionBounds(position)` | Returns `{ lower: tickLower, upper: tickUpper }`. |
+
+### Pool Operations
+
+| Method | V3 Notes |
+|---|---|
+| `selectBestPool(tokenASymbol, tokenBSymbol, provider, chainId)` | Probes all configured fee tiers (100, 500, 3000, 10000) via the factory, filters pools with zero liquidity, and returns the deepest pool. |
+| `describePool(pool)` | Format: `"WETH/USDC 0.05% (tick: -276250, liquidity: 1.2M)"`. |
+| `getPositionRange(poolData, upperPercent, lowerPercent)` | Returns `{ tickLower, tickUpper, currentTick }` aligned to the fee tier's tick spacing. |
+| `getPoolCurrent(poolData)` | Returns `poolData.tick` (for baseline tracking). |
+| `sortTokens(token0, token1)` | Lower-address-first (Uniswap canonical ordering). |
+| `getOptimalTokenRatio(params)` | Tick-range math via the V3 SDK `Position` class. |
+
+### Transaction Generation
+
+| Method | V3 Notes |
+|---|---|
+| `generateClaimFeesData(params)` | Calls `NonfungiblePositionManager.collect`. |
+| `generateRemoveLiquidityData(params)` | Calls `NonfungiblePositionManager.decreaseLiquidity` + `collect`. Accepts an optional `burnToken` flag to also call `burn` when removing 100%. |
+| `generateAddLiquidityData(params)` | Calls `NonfungiblePositionManager.increaseLiquidity`. Returns `{ to, data, value, quote }`. |
+| `generateCreatePositionData(params)` | Calls `NonfungiblePositionManager.mint`. Returns `{ to, data, value, quote }`. |
+| `batchSwapTransactions(swapInstructions, options)` | Uses AlphaRouter + Universal Router with Permit2. Handles per-swap Permit2 nonce tracking. |
+| `getBestSwapQuote(params)` | Uses AlphaRouter for optimal routing across V2/V3 pools. Supports `EXACT_INPUT` and `EXACT_OUTPUT`. |
+| `getRequiredApprovals(operationType, vaultAddress, tokenAddresses, provider)` | For `'liquidity'`: ERC20 approvals to `NonfungiblePositionManager`. For `'swap'`: ERC20 approvals to Permit2 (Universal Router pulls via Permit2). |
+
+### Receipt Parsing
+
+| Method | V3 Notes |
+|---|---|
+| `parseClosureReceipt(receipt, positionMetadata, options?)` | Parses `DecreaseLiquidity` + `Collect` events, subtracts principal from collect amounts to isolate fees. |
+| `parseCollectReceipt(receipt, positionMetadata, options?)` | Parses `Collect` events directly — amounts ARE the fees (no principal to subtract). |
+| `parseSwapReceipt(receipt, swapMetadata)` | Parses `Swap` events from V2/V3 pools emitted during Universal Router execution. |
+| `parseIncreaseLiquidityReceipt(receipt, { position, poolData })` | Parses `IncreaseLiquidity` event for existing positions or `IncreaseLiquidity` + pool info for new positions. |
+
+### Swap Event Monitoring
+
+| Method | V3 Notes |
+|---|---|
+| `getSwapEventFilter(poolId)` | V3 `Swap` events emit from each pool. Filter is `{ address: poolAddress, topics: [SwapTopic] }`. |
+| `parseSwapEvent(log)` | V3 `Swap(address sender, address recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)`. |
+| `evaluatePriceMovement(swapData, baseline, token0Data, token1Data)` | Converts ticks to prices via the V3 SDK, computes percent movement. |
+
+## V3-Specific Public Methods
+
+These methods are on the adapter instance but are V3-only (not part of the platform-agnostic interface). They are genuinely public — some tests and other callers use them directly.
+
+### isPositionInRange(currentTick, tickLower, tickUpper)
 
 > **V3-specific utility.** For the platform-agnostic interface method with distance metrics, use `evaluatePositionRange()` from the base class.
 
-Simple boolean check for whether a position is currently in range.
+Simple boolean check: `tickLower <= currentTick <= tickUpper`.
 
 ```javascript
 const inRange = adapter.isPositionInRange(currentTick, tickLower, tickUpper);
 ```
 
-Returns `true` if `tickLower <= currentTick <= tickUpper`.
+**Returns:** `boolean`
 
 ---
 
-## Price & Tick Calculations
+### calculatePriceFromSqrtPrice(sqrtPriceX96, baseToken, quoteToken)
 
-### calculatePriceFromSqrtPrice
-
-Calculate price from sqrtPriceX96 using the Uniswap V3 SDK.
+Calculate a price from a `sqrtPriceX96` using the Uniswap V3 SDK.
 
 ```javascript
 const price = adapter.calculatePriceFromSqrtPrice(
@@ -281,14 +146,15 @@ const price = adapter.calculatePriceFromSqrtPrice(
   quoteToken    // { address, decimals }
 );
 
-// Returns Uniswap SDK Price object
-console.log(price.toFixed(6));      // Fixed decimal string
+console.log(price.toFixed(6));       // Fixed decimal string
 console.log(price.toSignificant(6)); // Significant figures
 ```
 
+**Returns:** Uniswap SDK `Price` object.
+
 ---
 
-### tickToPrice
+### tickToPrice(tick, baseToken, quoteToken)
 
 Convert a tick value to a price.
 
@@ -296,9 +162,11 @@ Convert a tick value to a price.
 const price = adapter.tickToPrice(tick, baseToken, quoteToken);
 ```
 
+**Returns:** Uniswap SDK `Price` object.
+
 ---
 
-### priceToTick
+### priceToTick(price, baseToken, quoteToken)
 
 Convert a human-readable price to the closest valid tick.
 
@@ -306,48 +174,17 @@ Convert a human-readable price to the closest valid tick.
 const tick = adapter.priceToTick(price, baseToken, quoteToken);
 ```
 
----
-
-### calculateTickRangeFromPercentages
-
-Calculate tick range from percentage parameters.
-
-```javascript
-const { tickLower, tickUpper } = adapter.calculateTickRangeFromPercentages(
-  currentTick,   // Current pool tick
-  upperPercent,  // Upper range percentage (e.g., 10 for 10%)
-  lowerPercent,  // Lower range percentage (e.g., 10 for 10%)
-  fee            // Fee tier (for tick spacing alignment)
-);
-```
-
-Ticks are aligned to the tick spacing boundaries for the fee tier.
+**Returns:** `number`
 
 ---
 
-### calculateOriginalTick
+### calculateUncollectedFees(position, poolData)
 
-Reverse-engineer the tick where a position was created.
-
-```javascript
-const originalTick = adapter.calculateOriginalTick(
-  position,           // { tickLower, tickUpper, fee }
-  targetRangeUpper,   // Target range upper percentage (0-100)
-  targetRangeLower    // Target range lower percentage (0-100)
-);
-```
-
----
-
-## Fee & Amount Calculations
-
-### calculateUncollectedFees
-
-Calculate uncollected fees for a position.
+Calculate uncollected fees for a position as raw token amounts.
 
 ```javascript
 const [fees0, fees1] = adapter.calculateUncollectedFees(position, poolData);
-// Returns [bigint, bigint] - raw token amounts
+// Returns [bigint, bigint]
 ```
 
 #### Position Object
@@ -364,321 +201,13 @@ const [fees0, fees1] = adapter.calculateUncollectedFees(position, poolData);
 
 #### Pool Data Requirements
 
-- `tick: number` - Current pool tick
-- `feeGrowthGlobal0X128: string` - Global fee growth
-- `feeGrowthGlobal1X128: string` - Global fee growth
-- `ticks[tickLower]` - Lower tick data with feeGrowthOutside values
-- `ticks[tickUpper]` - Upper tick data with feeGrowthOutside values
-
----
-
-### calculateTokenAmounts
-
-Calculate token amounts for a position (if it were to be closed).
-
-```javascript
-const [amount0, amount1] = await adapter.calculateTokenAmounts(
-  position,   // { liquidity, tickLower, tickUpper }
-  poolData,   // { fee, sqrtPriceX96, liquidity, tick }
-  token0Data, // { address, decimals }
-  token1Data  // { address, decimals }
-);
-// Returns [bigint, bigint] - raw token amounts
-```
-
----
-
-## Swap Methods
-
-### getSwapQuote
-
-Get expected output amount for a swap using the Quoter contract.
-
-```javascript
-const amountOut = await adapter.getSwapQuote({
-  tokenInAddress: '0x...',
-  tokenOutAddress: '0x...',
-  fee: 500,
-  amountIn: '1000000000000000000',  // 1 token in wei
-  provider
-});
-// Returns string (wei amount)
-```
-
----
-
-### getBestSwapQuote
-
-Get best swap quote using AlphaRouter for optimal routing.
-
-```javascript
-// For EXACT_INPUT (specify input, get output)
-const quote = await adapter.getBestSwapQuote({
-  tokenInAddress: '0x...',
-  tokenOutAddress: '0x...',
-  amount: '1000000000000000000',
-  isAmountIn: true
-});
-
-// For EXACT_OUTPUT (specify output, get required input)
-const quote = await adapter.getBestSwapQuote({
-  tokenInAddress: '0x...',
-  tokenOutAddress: '0x...',
-  amount: '1000000',
-  isAmountIn: false
-});
-```
-
-#### Returns
-
-```javascript
-{
-  amountIn: string,     // Input amount (wei)
-  amountOut: string,    // Output amount (wei)
-  route: SwapRoute,     // Full route object
-  methodParameters?: MethodParameters
-}
-```
-
----
-
-### getSwapRoute
-
-Get swap route with execution-ready transaction data.
-
-```javascript
-const route = await adapter.getSwapRoute({
-  tokenInAddress: '0x...',
-  tokenOutAddress: '0x...',
-  amount: '1000000000000000000',
-  isAmountIn: true,
-  recipient: '0x...',
-  slippageTolerance: 0.5,    // 0.5%
-  deadlineMinutes: 30
-});
-```
-
-Returns route with `methodParameters` containing calldata for Universal Router.
-
----
-
-### _generateSwapData (Internal)
-
-> **⚠️ Internal Method**: This method is for test setup only. For production swaps, use `batchSwapTransactions()`.
-
-Generate swap transaction data using SwapRouter. Used internally by test files to fund wallets with tokens.
-
-```javascript
-// Test setup only
-const txData = await adapter._generateSwapData({
-  tokenIn: '0x...',
-  tokenOut: '0x...',
-  fee: 500,
-  recipient: '0x...',
-  amountIn: '1000000000000000000',
-  slippageTolerance: 0.5,
-  sqrtPriceLimitX96: '0',
-  deadlineMinutes: 20,
-  provider
-});
-```
-
-#### Returns
-
-```javascript
-{
-  to: string,    // Router address
-  data: string,  // Encoded calldata
-  value: string  // Transaction value (usually "0x00")
-}
-```
-
----
-
-### generateAlphaSwapData
-
-Generate swap transaction data using AlphaRouter route + Universal Router. Permit2 signature generation and calldata wrapping is handled internally by the adapter.
-
-```javascript
-const txData = await adapter.generateAlphaSwapData({
-  route,                    // Route from getSwapRoute()
-  recipient: '0x...',       // Address to receive output tokens
-  signer,                   // Ethers Wallet (for Permit2 signature generation)
-  tokenInAddress: '0x...',  // Input token address
-  amountIn: '...'           // Amount of input tokens (wei string)
-});
-```
-
-#### Parameters
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `route` | `Object` | Route object from `getSwapRoute()` |
-| `recipient` | `string` | Address to receive swap output |
-| `signer` | `ethers.Wallet` | Wallet instance for signing Permit2 authorization |
-| `tokenInAddress` | `string` | Address of input token |
-| `amountIn` | `string` | Amount of input tokens in wei |
-
-#### Returns
-
-```javascript
-{
-  to: string,    // Universal Router address
-  data: string,  // Encoded calldata (with Permit2 command prepended)
-  value: string  // Transaction value
-}
-```
-
-Note: The adapter internally handles Permit2 nonce lookup, signature generation, and calldata wrapping. The signer must have a provider attached.
-
----
-
-## Liquidity Management
-
-### generateClaimFeesData
-
-Generate transaction data for claiming fees from a position.
-
-```javascript
-const txData = await adapter.generateClaimFeesData({
-  positionId: '12345',
-  provider,
-  walletAddress: '0x...',
-  token0Address: '0x...',
-  token1Address: '0x...',
-  token0Decimals: 18,
-  token1Decimals: 6
-});
-```
-
----
-
-### generateRemoveLiquidityData
-
-Generate transaction data for removing liquidity.
-
-```javascript
-const txData = await adapter.generateRemoveLiquidityData({
-  position: {
-    id: '12345',
-    tickLower: 195000,
-    tickUpper: 205000
-  },
-  percentage: 50,          // 50% of liquidity
-  provider,
-  walletAddress: '0x...',
-  poolData: {
-    fee: 500,
-    sqrtPriceX96: '...',
-    liquidity: '...',
-    tick: 200000
-  },
-  token0Data: { address: '0x...', decimals: 18 },
-  token1Data: { address: '0x...', decimals: 6 },
-  slippageTolerance: 0.5,
-  deadlineMinutes: 20
-});
-```
-
----
-
-### generateAddLiquidityData
-
-Generate transaction data for adding liquidity to an existing position.
-
-```javascript
-const result = await adapter.generateAddLiquidityData({
-  position: {
-    id: '12345',
-    tickLower: 195000,
-    tickUpper: 205000
-  },
-  token0Amount: '1000000000000000000',  // wei string
-  token1Amount: '1000000',               // wei string
-  provider,
-  poolData: { fee, sqrtPriceX96, liquidity, tick },
-  token0Data: { address, decimals },
-  token1Data: { address, decimals },
-  slippageTolerance: 0.5,
-  deadlineMinutes: 20
-});
-
-// Returns { to, data, value, quote }
-```
-
----
-
-### getAddLiquidityQuote
-
-Get liquidity quote for adding liquidity without generating transaction data.
-
-```javascript
-const quote = await adapter.getAddLiquidityQuote({
-  position: { tickLower: 195000, tickUpper: 205000 },
-  token0Amount: '1000000000000000000',
-  token1Amount: '1000000',
-  provider,
-  poolData,
-  token0Data,
-  token1Data
-});
-
-// Returns { position, tokensSwapped, sortedToken0, sortedToken1, pool }
-```
-
----
-
-### generateCreatePositionData
-
-Generate transaction data for creating a new position.
-
-```javascript
-const result = await adapter.generateCreatePositionData({
-  position: {
-    tickLower: 195000,
-    tickUpper: 205000
-  },
-  token0Amount: '1000000000000000000',
-  token1Amount: '1000000',
-  provider,
-  walletAddress: '0x...',
-  poolData: { fee, sqrtPriceX96, liquidity, tick },
-  token0Data: { address, decimals },
-  token1Data: { address, decimals },
-  slippageTolerance: 0.5,
-  deadlineMinutes: 20
-});
-
-// Returns { to, data, value, quote }
-```
-
----
-
-## Utility Methods
-
-### sortTokens
-
-Sort tokens according to Uniswap V3 rules (lower address first).
-
-```javascript
-const { sortedToken0, sortedToken1, tokensSwapped } = adapter.sortTokens(
-  token0,  // { address }
-  token1   // { address }
-);
-```
-
----
-
-### getSwapEventSignature
-
-Get the Uniswap V3 Swap event signature for event filtering.
-
-```javascript
-const signature = adapter.getSwapEventSignature();
-// Returns: 'Swap(address,address,int256,int256,uint160,uint128,int24)'
-```
-
----
+- `tick: number` — Current pool tick
+- `feeGrowthGlobal0X128: string` — Global fee growth
+- `feeGrowthGlobal1X128: string` — Global fee growth
+- `ticks[tickLower]` — Lower tick data with `feeGrowthOutside` values
+- `ticks[tickUpper]` — Upper tick data with `feeGrowthOutside` values
+
+> `poolData.ticks` is populated by the internal `_fetchTickData(poolAddress, tickLower, tickUpper, provider)` helper — callers don't normally construct this by hand; it is built during `getPositionsForVDS` / `getAccruedFeesUSD`.
 
 ## Error Handling
 
@@ -686,12 +215,11 @@ All methods validate their inputs and throw descriptive errors:
 
 ```javascript
 try {
-  const poolData = await adapter.fetchPoolData(token0, token1, fee, provider);
+  const poolData = await adapter.getPoolData(poolAddress, provider);
 } catch (error) {
   // Possible errors:
-  // - "Token0 address parameter is required"
-  // - "Invalid token0 address: ..."
-  // - "Unsupported token: ... on chain ..."
+  // - "Pool address parameter is required"
+  // - "Valid provider parameter is required"
   // - "Provider chain X doesn't match adapter chain Y"
   // - "Failed to fetch pool data: ..."
 }
@@ -699,15 +227,19 @@ try {
 
 ## Dependencies
 
-- `ethers` - Ethereum library
-- `@uniswap/v3-sdk` - Uniswap V3 SDK for position/pool calculations
-- `@uniswap/sdk-core` - Uniswap core SDK types
-- `@uniswap/smart-order-router` - AlphaRouter for optimal swap routing
-- `@uniswap/universal-router-sdk` - Universal Router integration
-- `jsbi` - JavaScript BigInt library for SDK compatibility
+- `ethers` v5 — Ethereum library
+- `@uniswap/v3-sdk` — Uniswap V3 SDK for position/pool calculations
+- `@uniswap/sdk-core` — Uniswap core SDK types
+- `@uniswap/smart-order-router` — AlphaRouter for optimal swap routing
+- `@uniswap/universal-router-sdk` + `@uniswap/universal-router` — Universal Router integration
+- `@uniswap/router-sdk` — Multi-protocol routing
+- `@uniswap/v3-core` + `@uniswap/v3-periphery` — Pool and NonfungiblePositionManager ABIs
+- `jsbi` — JavaScript BigInt library for SDK compatibility
 
 ## See Also
 
-- [PlatformAdapter](./platform-adapter.md) — Base class with all 27 required + 4 optional method signatures
+- [PlatformAdapter](./platform-adapter.md) — Base class with all required + optional method signatures
+- [UniswapV4Adapter](./uniswap-v4-adapter.md) — V4 implementation (shared tick math, different pool architecture)
+- [TraderJoeV2_2Adapter](./traderJoe-v2-2-adapter.md) — Bin-based AMM for comparison
 - [AdapterFactory](./adapter-factory.md) — Factory for creating adapters
 - [Adapters Architecture](../../architecture/adapters.md) — Design decisions, data shapes, automation flows

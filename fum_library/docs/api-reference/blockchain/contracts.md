@@ -1,500 +1,308 @@
 <!-- Source: src/blockchain/contracts.js -->
 # Contracts API
 
-Utilities for interacting with FUM vault contracts and related infrastructure.
+Utilities for interacting with FUM vault contracts and related infrastructure. Uses ethers.js v5 throughout.
 
 ## Overview
 
-The Contracts module provides helper functions for working with vault contracts, including the VaultFactory, PositionVault, and BatchExecutor contracts. It handles contract instantiation, address resolution, and common operations.
+The Contracts module provides helper functions for working with the vault system: the `VaultFactory`, individual `PositionVault` instances, and strategy contracts deployed under the factory. It handles contract instantiation (with ABIs and chain-specific addresses from `src/artifacts/contracts.js`), address resolution, common vault operations, and atomic batch transaction execution.
+
+## Exports
+
+```javascript
+import {
+  getContract,
+  getVaultFactory,
+  getVaultFactoryAddress,
+  createVault,
+  getVaultContract,
+  getUserVaults,
+  getActiveVaults,
+  getVaultInfo,
+  getVaultExecutorIndex,
+  getContractInfoByAddress,
+  executeVaultTransactions,
+} from 'fum_library/blockchain/contracts';
+```
+
+---
 
 ## Contract Instantiation
 
 ### getContract
 
-Gets a contract instance using the appropriate address for the current network.
-
-#### Signature
-```javascript
-getContract(contractName: string, provider: ethers.JsonRpcProvider, signer?: ethers.Signer): ethers.Contract
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| contractName | `string` | Yes | Name of the contract ("VaultFactory", "PositionVault", or "BatchExecutor") |
-| provider | `ethers.JsonRpcProvider` | Yes | Ethers provider |
-| signer | `ethers.Signer` | No | Optional signer for write operations |
-
-#### Returns
-
-`ethers.Contract` - The contract instance
-
-#### Throws
-
-| Error | Condition |
-|-------|-----------|
-| `Error` | Contract not found in contract data |
-| `Error` | Provider network not available |
-| `Error` | No deployment found for network |
-
-#### Example
+Creates a read-only contract instance for the provider's current network. Detects chain ID automatically from the provider.
 
 ```javascript
-import { getContract } from './blockchain/contracts.js';
-
-// Read-only contract
-const factory = getContract('VaultFactory', provider);
-
-// Contract with signer for transactions
-const factoryWithSigner = getContract('VaultFactory', provider, signer);
+async getContract(
+  contractName: string,
+  provider: ethers.providers.Provider
+): Promise<ethers.Contract>
 ```
 
-### getVaultContract
+| Name | Type | Description |
+|------|------|-------------|
+| `contractName` | `string` | Name of the contract (e.g., `'VaultFactory'`, `'PositionVault'`, `'bob'`) |
+| `provider` | `ethers.providers.Provider` | Ethers v5 provider |
 
-Creates a PositionVault contract instance for a specific vault address.
+**Throws:**
+- `Contract name must be a valid string.` — missing/wrong type
+- `Invalid provider. Must be an ethers provider instance.` — not a `Provider`
+- `Provider network not available. ...` — `provider.getNetwork()` failed
+- `Contract <name> not found in contract data` — unknown contract name
+- `No <name> deployment found for network <chainId>` — contract exists but not deployed on this chain
 
-#### Signature
-```javascript
-getVaultContract(vaultAddress: string, provider: ethers.JsonRpcProvider, signer?: ethers.Signer): ethers.Contract
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| vaultAddress | `string` | Yes | Address of the vault |
-| provider | `ethers.JsonRpcProvider` | Yes | Ethers provider |
-| signer | `ethers.Signer` | No | Optional signer for write operations |
-
-#### Returns
-
-`ethers.Contract` - The vault contract instance
-
-#### Example
+Returned contract is read-only. Connect a signer for write operations:
 
 ```javascript
-const vaultAddress = '0x1234...';
-const vault = getVaultContract(vaultAddress, provider, signer);
-
-// Read vault owner
-const owner = await vault.owner();
+const factory = await getContract('VaultFactory', provider);
+const factoryWithSigner = factory.connect(signer);
+await factoryWithSigner.createVault('My Vault');
 ```
+
+---
 
 ### getVaultFactory
 
-Gets the VaultFactory contract for the current network.
-
-#### Signature
-```javascript
-getVaultFactory(provider: ethers.JsonRpcProvider, signer?: ethers.Signer): ethers.Contract
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| provider | `ethers.JsonRpcProvider` | Yes | Ethers provider |
-| signer | `ethers.Signer` | No | Optional signer for write operations |
-
-#### Returns
-
-`ethers.Contract` - The VaultFactory contract instance
-
-#### Example
+Shorthand for `getContract('VaultFactory', provider)`.
 
 ```javascript
-const factory = getVaultFactory(provider);
-const userVaults = await factory.getVaults(userAddress);
+async getVaultFactory(provider: ethers.providers.Provider): Promise<ethers.Contract>
 ```
 
-### getBatchExecutor
+---
 
-Gets the BatchExecutor contract for the current network.
+### getVaultContract
 
-#### Signature
-```javascript
-getBatchExecutor(provider: ethers.JsonRpcProvider, signer?: ethers.Signer): ethers.Contract
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| provider | `ethers.JsonRpcProvider` | Yes | Ethers provider |
-| signer | `ethers.Signer` | No | Optional signer for write operations |
-
-#### Returns
-
-`ethers.Contract` - The BatchExecutor contract instance
-
-#### Example
+Creates a `PositionVault` contract instance for a specific vault address. Synchronous — no network call (uses the provider for later read/write operations, not for address resolution).
 
 ```javascript
-const batchExecutor = getBatchExecutor(provider, signer);
+getVaultContract(
+  vaultAddress: string,
+  provider: ethers.providers.Provider
+): ethers.Contract
 ```
+
+**Throws** if `vaultAddress` is missing/invalid, provider is not an ethers provider, or the bundled `PositionVault` ABI is missing.
+
+```javascript
+const vault = getVaultContract('0xVault...', provider);
+const owner = await vault.owner();
+
+// Connect a signer for writes
+const vaultWithSigner = vault.connect(signer);
+```
+
+---
 
 ## Address Utilities
 
 ### getVaultFactoryAddress
 
-Gets the address of the VaultFactory for a specific network.
-
-#### Signature
-```javascript
-getVaultFactoryAddress(chainId: number | string): string | null
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| chainId | `number \| string` | Yes | Chain ID of the network |
-
-#### Returns
-
-`string | null` - Address of the VaultFactory or null if not deployed
-
-#### Example
+Synchronous lookup of the `VaultFactory` deployment address for a chain.
 
 ```javascript
-const factoryAddress = getVaultFactoryAddress(1); // Mainnet
-// "0x1234..."
-
-const polygonFactory = getVaultFactoryAddress(137); // Polygon
-// "0x5678..." or null if not deployed
+getVaultFactoryAddress(chainId: number): string | null
 ```
 
-### getBatchExecutorAddress
+Returns `null` if the factory is not deployed on the given chain.
 
-Gets the address of the BatchExecutor for a specific network.
-
-#### Signature
-```javascript
-getBatchExecutorAddress(chainId: number | string): string | null
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| chainId | `number \| string` | Yes | Chain ID of the network |
-
-#### Returns
-
-`string | null` - Address of the BatchExecutor or null if not deployed
-
-#### Example
+**Throws** `chainId must be a number` if `chainId` is not a number.
 
 ```javascript
-const batchAddress = getBatchExecutorAddress(1);
-// "0xabcd..."
+const factoryAddress = getVaultFactoryAddress(42161);
+// "0x..." or null
 ```
+
+---
+
+### getContractInfoByAddress
+
+Reverse lookup: given a deployed contract address, return the contract name and chain ID.
+
+```javascript
+getContractInfoByAddress(address: string): {
+  contractName: string,
+  chainId: number
+}
+```
+
+Address comparison is case-insensitive.
+
+**Throws** if the address is missing, not a valid Ethereum address, or not found in any deployment.
+
+---
 
 ## Vault Operations
 
 ### createVault
 
-Creates a new vault using the VaultFactory.
-
-#### Signature
-```javascript
-async createVault(name: string, signer: ethers.Signer): Promise<string>
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| name | `string` | Yes | Name for the new vault |
-| signer | `ethers.Signer` | Yes | Signer for the transaction |
-
-#### Returns
-
-`Promise<string>` - The address of the newly created vault
-
-#### Throws
-
-| Error | Condition |
-|-------|-----------|
-| `Error` | Failed to find VaultCreated event |
-
-#### Example
+Creates a new vault via `VaultFactory.createVault(name)`. Sends a transaction, waits for the receipt, and extracts the new vault's address from the `VaultCreated` event.
 
 ```javascript
-const vaultName = "My DeFi Vault";
-const vaultAddress = await createVault(vaultName, signer);
-console.log('Created vault at:', vaultAddress);
+async createVault(
+  name: string,
+  signer: ethers.Signer
+): Promise<string>
 ```
+
+**Throws:**
+- `Name must be a string` / `Vault name cannot be empty`
+- `Invalid signer. ...`
+- `Failed to create vault: <reason>` for on-chain reverts
+- `Transaction failed: ...` / `Network error while creating vault: ...`
+- `Failed to find VaultCreated event in transaction receipt` — unexpected receipt shape
+
+---
 
 ### getUserVaults
 
-Gets all vaults owned by a user.
-
-#### Signature
-```javascript
-async getUserVaults(userAddress: string, provider: ethers.JsonRpcProvider): Promise<string[]>
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| userAddress | `string` | Yes | Address of the user |
-| provider | `ethers.JsonRpcProvider` | Yes | Ethers provider |
-
-#### Returns
-
-`Promise<string[]>` - Array of vault addresses
-
-#### Example
+All vault addresses owned by a user, via `VaultFactory.getVaults(user)`.
 
 ```javascript
-const vaults = await getUserVaults(userAddress, provider);
-console.log(`User has ${vaults.length} vaults`);
+async getUserVaults(
+  userAddress: string,
+  provider: ethers.providers.Provider
+): Promise<string[]>
 ```
+
+**Throws** if `userAddress` is missing/invalid or the factory call fails.
+
+---
+
+### getActiveVaults
+
+All vaults currently with an executor set (automation enabled), via `VaultFactory.getActiveVaults()`.
+
+```javascript
+async getActiveVaults(provider: ethers.providers.Provider): Promise<string[]>
+```
+
+The factory maintains the index — this is O(1) on the client.
+
+**Throws** if the factory call fails.
+
+---
 
 ### getVaultInfo
 
-Gets information about a vault.
-
-#### Signature
-```javascript
-async getVaultInfo(vaultAddress: string, provider: ethers.JsonRpcProvider): Promise<{owner: string, name: string, creationTime: number}>
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| vaultAddress | `string` | Yes | Address of the vault |
-| provider | `ethers.JsonRpcProvider` | Yes | Ethers provider |
-
-#### Returns
-
-`Promise<Object>` - Vault information:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| owner | `string` | Vault owner address |
-| name | `string` | Vault name |
-| creationTime | `number` | Creation timestamp |
-
-#### Example
+Reads metadata from `VaultFactory.getVaultInfo(vault)`.
 
 ```javascript
-const info = await getVaultInfo(vaultAddress, provider);
-console.log(`Vault "${info.name}" owned by ${info.owner}`);
+async getVaultInfo(
+  vaultAddress: string,
+  provider: ethers.providers.Provider
+): Promise<{
+  owner: string,
+  name: string,
+  creationTime: number,
+  creationBlock: number,
+  executorIndex: number
+}>
 ```
+
+`creationTime`, `creationBlock`, and `executorIndex` are returned as plain numbers (converted from on-chain `uint256`).
+
+**Throws** if `vaultAddress` is invalid or the factory call fails.
+
+---
+
+### getVaultExecutorIndex
+
+Convenience accessor — reads only the `executorIndex` field.
+
+```javascript
+async getVaultExecutorIndex(
+  vaultAddress: string,
+  provider: ethers.providers.Provider
+): Promise<number>
+```
+
+---
 
 ## Transaction Execution
 
 ### executeVaultTransactions
 
-Executes a batch of transactions through a vault.
-
-#### Signature
-```javascript
-async executeVaultTransactions(vaultAddress: string, transactions: Array<{target: string, data: string}>, signer: ethers.Signer): Promise<boolean[]>
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| vaultAddress | `string` | Yes | Address of the vault |
-| transactions | `Array<Object>` | Yes | Array of transactions to execute |
-| transactions[].target | `string` | Yes | Target contract address |
-| transactions[].data | `string` | Yes | Encoded transaction data |
-| signer | `ethers.Signer` | Yes | Signer for the transaction |
-
-#### Returns
-
-`Promise<boolean[]>` - Array of success flags for each transaction
-
-#### Example
+Executes a batch of transactions through a vault's `execute(targets, data)` method. **Atomic** — all transactions succeed together, or the whole call reverts. The return value is a single boolean (`true` if the vault accepted the batch).
 
 ```javascript
-const transactions = [
-  {
-    target: tokenAddress,
-    data: tokenContract.interface.encodeFunctionData('approve', [spender, amount])
-  },
-  {
-    target: dexAddress,
-    data: dexContract.interface.encodeFunctionData('swap', [...params])
-  }
-];
-
-const results = await executeVaultTransactions(vaultAddress, transactions, signer);
-console.log('Transaction results:', results); // [true, true]
+async executeVaultTransactions(
+  vaultAddress: string,
+  transactions: Array<{ target: string, data: string }>,
+  signer: ethers.Signer
+): Promise<boolean>
 ```
-
-### executeBatchTransactions
-
-Executes a batch of transactions through the BatchExecutor.
-
-#### Signature
-```javascript
-async executeBatchTransactions(transactions: Array<{to: string, data: string, value?: string}>, signer: ethers.Signer): Promise<{successes: boolean[], results: string[]}>
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| transactions | `Array<Object>` | Yes | Array of transactions to execute |
-| transactions[].to | `string` | Yes | Target address |
-| transactions[].data | `string` | Yes | Encoded transaction data |
-| transactions[].value | `string` | No | ETH value to send |
-| signer | `ethers.Signer` | Yes | Signer for the transaction |
-
-#### Returns
-
-`Promise<Object>` - Batch execution results:
 
 | Field | Type | Description |
-|-------|------|-------------|
-| successes | `boolean[]` | Success flag for each transaction |
-| results | `string[]` | Return data for each transaction |
+|---|---|---|
+| `transactions[].target` | `string` | Target contract address |
+| `transactions[].data` | `string` | Hex-encoded calldata (must start with `0x`) |
 
-#### Example
+**Throws:**
+- `Vault address parameter is required` / `Invalid vault address: ...`
+- `Transactions must be an array` / `Transactions array cannot be empty`
+- `Transaction at index N is missing target address` / `... missing data`
+- `Invalid target address at index N: ...`
+- `Transaction data at index N must be a string` / `... must be hex encoded (start with 0x)`
+- `Invalid signer. ...`
+- `Failed to execute vault transactions: <underlying>`
 
-```javascript
-const transactions = [
-  {
-    to: token1Address,
-    data: encodeApproval(spender, amount1),
-    value: '0'
-  },
-  {
-    to: token2Address,
-    data: encodeApproval(spender, amount2),
-    value: '0'
-  },
-  {
-    to: dexAddress,
-    data: encodeSwap(params),
-    value: ethers.parseEther('0.1') // Sending ETH
-  }
-];
+This is the primary on-chain path adapters use for swaps, liquidity operations, and approvals — each `{ to, data, value }` transaction returned by an adapter's `generate*` method is executed through the vault via this function (adapters map `to` → `target`, and `value` is handled by the vault's native-ETH wrapping logic).
 
-const { successes, results } = await executeBatchTransactions(transactions, signer);
-
-successes.forEach((success, i) => {
-  console.log(`Transaction ${i}: ${success ? 'Success' : 'Failed'}`);
-});
-```
+---
 
 ## Common Patterns
 
-### Creating and Managing Vaults
+### Creating and Managing a Vault
 
 ```javascript
-import * as contracts from './blockchain/contracts.js';
+import {
+  createVault,
+  getVaultInfo,
+  getVaultContract
+} from 'fum_library/blockchain/contracts';
 
 async function setupVault(signer) {
-  // Create a new vault
-  const vaultAddress = await contracts.createVault('My Trading Vault', signer);
-  
-  // Get vault info
-  const info = await contracts.getVaultInfo(vaultAddress, signer.provider);
+  const vaultAddress = await createVault('My Trading Vault', signer);
+  const info = await getVaultInfo(vaultAddress, signer.provider);
   console.log(`Created vault "${info.name}" at ${vaultAddress}`);
-  
-  // Get vault contract for direct interaction
-  const vault = contracts.getVaultContract(vaultAddress, signer.provider, signer);
-  
-  return vault;
+
+  return getVaultContract(vaultAddress, signer.provider);
 }
 ```
 
-### Batch Operations
+### Multi-Chain Deployment Check
 
 ```javascript
-async function performBatchOperations(vaultAddress, signer) {
-  // Prepare multiple transactions
-  const transactions = [];
-  
-  // Add token approval
-  transactions.push({
-    target: tokenAddress,
-    data: tokenInterface.encodeFunctionData('approve', [
-      positionManagerAddress,
-      ethers.MaxUint256
-    ])
-  });
-  
-  // Add liquidity provision
-  transactions.push({
-    target: positionManagerAddress,
-    data: positionManagerInterface.encodeFunctionData('mint', [mintParams])
-  });
-  
-  // Execute through vault
-  const results = await contracts.executeVaultTransactions(
-    vaultAddress,
-    transactions,
-    signer
-  );
-  
-  if (results.every(r => r)) {
-    console.log('All transactions successful');
-  }
-}
-```
+import { getVaultFactoryAddress } from 'fum_library/blockchain/contracts';
 
-### Multi-Chain Support
-
-```javascript
-async function getContractsForChain(chainId, provider, signer) {
-  // Check if contracts are deployed on this chain
-  const factoryAddress = contracts.getVaultFactoryAddress(chainId);
-  const batchAddress = contracts.getBatchExecutorAddress(chainId);
-  
-  if (!factoryAddress || !batchAddress) {
-    throw new Error(`Contracts not deployed on chain ${chainId}`);
-  }
-  
-  // Get contract instances
-  return {
-    factory: contracts.getVaultFactory(provider, signer),
-    batchExecutor: contracts.getBatchExecutor(provider, signer)
-  };
+function isFactoryDeployed(chainId) {
+  return getVaultFactoryAddress(chainId) !== null;
 }
 ```
 
 ## Error Handling
 
 ```javascript
-async function safeCreateVault(name, signer) {
-  try {
-    const vaultAddress = await contracts.createVault(name, signer);
-    return vaultAddress;
-  } catch (error) {
-    if (error.message.includes('Provider network not available')) {
-      console.error('Wallet network connection issue - check provider');
-    } else if (error.message.includes('No VaultFactory deployment')) {
-      console.error('VaultFactory not deployed on this network');
-    } else if (error.message.includes('VaultCreated event')) {
-      console.error('Vault creation failed - check transaction');
-    } else {
-      console.error('Unexpected error:', error);
-    }
-    throw error;
+try {
+  const vaultAddress = await createVault('My Vault', signer);
+} catch (error) {
+  if (error.message.includes('Provider network not available')) {
+    // Wallet network issue
+  } else if (error.message.includes('No VaultFactory deployment')) {
+    // Factory not deployed on this chain
+  } else if (error.message.includes('VaultCreated event')) {
+    // Vault creation succeeded but event parsing failed
+  } else {
+    // Unexpected error
   }
+  throw error;
 }
 ```
 
-## Best Practices
-
-1. **Signer Management**: Only provide signers when write operations are needed
-2. **Event Parsing**: Always verify transaction success through events
-3. **Gas Estimation**: Consider gas costs for batch operations
-4. **Error Handling**: Implement proper error handling for contract calls
-5. **Network Validation**: Verify contract deployment before operations
-
 ## See Also
 
-- [`wallet`](./wallet.md) - Wallet and provider utilities
-- [Vault Architecture](../../architecture/overview.md) - System architecture
-- [ethers.js Contract Documentation](https://docs.ethers.org/v6/api/contract/)
+- [`wallet`](./wallet.md) — Provider and wallet utilities
+- [Blockchain Architecture](../../architecture/blockchain.md) — Module overview
+- [ethers.js v5 Contract Docs](https://docs.ethers.org/v5/api/contract/)

@@ -23,7 +23,7 @@ import {
 
 ### formatPrice
 
-Formats a price value with appropriate precision based on its magnitude, using thousands separators implicitly via `toFixed`. Returns abbreviated format (`M`, `B`) for very large values.
+Formats a price value with appropriate precision based on its magnitude. Returns abbreviated format (`M`, `B`) for very large values. Output uses `Number.prototype.toFixed` — no thousands separators are inserted.
 
 #### Signature
 ```javascript

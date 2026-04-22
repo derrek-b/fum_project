@@ -4,6 +4,8 @@
 
 FUM is a DeFi liquidity management platform. Users deploy non-custodial vaults that hold tokens and concentrated-liquidity positions across multiple DEXes. An automation service watches those vaults around the clock and executes rebalances, fee collection, and position management based on the strategy each user picks.
 
+> **Note:** To interact with live contracts on Arbitrum, visit the [hosted app](https://fum-one.vercel.app/). This repository is the source code — running it locally is for development and full-stack integration testing (see [fum/TESTING.md](fum/TESTING.md)).
+
 **Supported platforms:** Uniswap V3 · Uniswap V4 · Trader Joe V2.2
 **Chains:** Arbitrum (primary) · Avalanche (Trader Joe) · Hardhat fork (local dev)
 
@@ -17,15 +19,15 @@ FUM is a DeFi liquidity management platform. Users deploy non-custodial vaults t
                        ┌─────────▼──────────┐
                        │   fum (frontend)   │◄──── SSE updates ────┐
                        │  Next.js + React   │                      │
-                       └─────────┬──────────┘                      │
-                                 │ tx                              │
-            ┌────────────────────▼─────────────────────────┐       │
+                       └───────┬─────▲──────┘                      │
+                            tx │     │ reads                       │
+            ┌──────────────────▼─────┴─────────────────────┐       │
             │             Smart Contracts                  │       │
             │  PositionVault · VaultFactory · Strategies   │       │
             │  Validators · TJPositionManager              │       │
-            └────────────────────▲─────────────────────────┘       │
-                                 │ tx                              │
-                       ┌─────────┴──────────┐                      │
+            └──────────────────▲─────┬─────────────────────┘       │
+                            tx │     │ events                      │
+                       ┌───────┴─────▼──────┐                      │
                        │   fum_automation   │──────────────────────┘
                        │  Node.js service   │
                        └────────────────────┘
@@ -59,6 +61,7 @@ This README is orientation. Each subproject has its own README and TESTING guide
 
 | If you want to... | Go to |
 |-------------------|-------|
+| Use FUM on Arbitrum | [hosted app](https://fum-one.vercel.app/) |
 | Run the full stack locally | [fum/TESTING.md](fum/TESTING.md) — 4-terminal walkthrough with env config, seeding, and troubleshooting |
 | Read or modify the smart contracts | [fum/](fum/) — contracts live in `fum/contracts/` |
 | Extend the automation service | [fum_automation/](fum_automation/) |

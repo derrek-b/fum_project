@@ -7,7 +7,7 @@ Factory class for creating platform-specific adapter instances.
 
 ## Overview
 
-`AdapterFactory` manages a static registry of platform adapter classes and creates instances on demand. Adapters are keyed by platform ID and constructed with `(chainId, provider)`.
+`AdapterFactory` manages a static registry of platform adapter classes and creates instances on demand. Adapters are keyed by platform ID and constructed with `(chainId)` only — providers are passed per-method call on the resulting adapter instance.
 
 ## Registered Adapters
 
@@ -19,19 +19,18 @@ Factory class for creating platform-specific adapter instances.
 
 ## Static Methods
 
-### getAdapter(platformId, chainId, provider)
+### getAdapter(platformId, chainId)
 
 Create a specific platform adapter.
 
 ```javascript
-const adapter = AdapterFactory.getAdapter('uniswapV3', 42161, provider);
+const adapter = AdapterFactory.getAdapter('uniswapV3', 42161);
 ```
 
 | Param | Type | Description |
 |---|---|---|
 | `platformId` | `string` | Platform identifier (e.g., `'uniswapV3'`) |
 | `chainId` | `number` | Chain ID (e.g., 42161 for Arbitrum) |
-| `provider` | `ethers.Provider` | Ethers provider instance |
 
 **Returns:** Platform adapter instance.
 
@@ -43,12 +42,12 @@ const adapter = AdapterFactory.getAdapter('uniswapV3', 42161, provider);
 
 ---
 
-### getAdaptersForChain(chainId, provider)
+### getAdaptersForChain(chainId)
 
 Create all registered adapters for a specific chain. Unlike `getAdapter`, this does not throw on individual adapter failures — it collects them in a `failures` array.
 
 ```javascript
-const { adapters, failures } = AdapterFactory.getAdaptersForChain(42161, provider);
+const { adapters, failures } = AdapterFactory.getAdaptersForChain(42161);
 
 console.log(`Created ${adapters.length} adapters`);
 if (failures.length > 0) {
@@ -59,7 +58,6 @@ if (failures.length > 0) {
 | Param | Type | Description |
 |---|---|---|
 | `chainId` | `number` | Chain ID |
-| `provider` | `ethers.Provider` | Ethers provider instance |
 
 **Returns:** `{ adapters: Array, failures: Array<{ platformId, error, errorDetails }> }`
 
@@ -109,17 +107,20 @@ AdapterFactory.registerAdapterForTestingOnly('mockPlatform', MockAdapter);
 
 ## Convenience Wrappers (adapters/index.js)
 
-> **Warning:** The convenience functions exported from `adapters/index.js` have stale signatures that pass an extra `config` parameter not accepted by the factory methods. Use `AdapterFactory` directly.
+`adapters/index.js` re-exports thin wrappers around the factory for ergonomic imports:
 
 ```javascript
-// These have incorrect signatures — do NOT use:
-// getAdaptersForChain(config, chainId, provider)  ← wrong
-// getAdapter(config, platformId, provider)         ← wrong
-// registerAdapter(platformId, AdapterClass)        ← calls non-existent method
+import {
+  getAdaptersForChain,
+  getAdapter,
+  getSupportedPlatforms
+} from 'fum_library/adapters';
 
-// Use AdapterFactory directly instead:
-import { AdapterFactory } from 'fum_library/adapters';
+const { adapters, failures } = getAdaptersForChain(42161);
+const adapter = getAdapter('uniswapV3', 42161);
 ```
+
+> There is no convenience wrapper for `registerAdapterForTestingOnly` — call `AdapterFactory.registerAdapterForTestingOnly(platformId, AdapterClass)` directly. The omission is intentional: the wrapper would re-expose the testing-only escape hatch under a production-looking name.
 
 ## Usage Examples
 
@@ -128,7 +129,7 @@ import { AdapterFactory } from 'fum_library/adapters';
 ```javascript
 import { AdapterFactory } from 'fum_library/adapters';
 
-const { adapters, failures } = AdapterFactory.getAdaptersForChain(42161, provider);
+const { adapters, failures } = AdapterFactory.getAdaptersForChain(42161);
 
 for (const adapter of adapters) {
   console.log(`Loaded ${adapter.platformName} (${adapter.platformId})`);
@@ -138,7 +139,7 @@ for (const adapter of adapters) {
 ### Getting a specific adapter for a known platform
 
 ```javascript
-const adapter = AdapterFactory.getAdapter(position.platform, chainId, provider);
+const adapter = AdapterFactory.getAdapter(position.platform, chainId);
 const poolData = await adapter.getPoolData(position.pool, provider);
 ```
 

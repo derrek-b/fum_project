@@ -1,7 +1,7 @@
 <!-- Source: src/adapters/TraderJoeV2_2Adapter.js -->
 # TraderJoeV2_2Adapter
 
-The Trader Joe V2.2 Liquidity Book adapter for bin-based concentrated liquidity on Avalanche and Arbitrum.
+The Trader Joe V2.2 Liquidity Book adapter for bin-based concentrated liquidity on Avalanche.
 
 ## Overview
 

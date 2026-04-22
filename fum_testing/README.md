@@ -2,6 +2,8 @@
 
 Unit tests for the FUM smart contracts. FUM is a DeFi liquidity management platform; this project provides Hardhat-based test coverage for the vault system, strategies, validators, and supporting contracts.
 
+> `fum_testing` is one subproject in the [fum_project monorepo](../README.md). The root README has the big-picture architecture and sibling-project overview; this doc covers `fum_testing` specifically.
+
 ## Overview
 
 This testing suite validates all contracts synced from `fum/contracts/`:
@@ -10,7 +12,7 @@ This testing suite validates all contracts synced from `fum/contracts/`:
 
 | Contract | Description |
 |----------|-------------|
-| `PositionVault` | User-controlled vault for ERC20s, native ETH, and LP positions across platforms |
+| `PositionVault` | User-controlled vault for tokens (ERC20 & native), and LP positions across platforms |
 | `VaultFactory` | Factory that deploys vaults and manages validator registries |
 
 **Strategies**
@@ -19,7 +21,6 @@ This testing suite validates all contracts synced from `fum/contracts/`:
 |----------|-------------|
 | `StrategyBase` | Abstract base contract for strategy implementations |
 | `BabyStepsStrategy` | Conservative range-based automation strategy |
-| `ParrisIslandStrategy` | Advanced adaptive strategy with dynamic range adjustments |
 
 **Trader Joe**
 
@@ -100,7 +101,6 @@ test/unit/
 ├── VaultFactory.test.js               # Factory deployment and vault creation
 ├── StrategyBase.test.js               # Abstract strategy base tests
 ├── BabyStepsStrategy.test.js          # Conservative strategy logic
-├── ParrisIslandStrategy.test.js       # Advanced adaptive strategy
 ├── TJPositionManager.test.js          # Trader Joe V2.2 bin position management
 ├── TJPositionProxy.test.js            # Proxy initialization, execution, access control
 └── validators/
@@ -128,16 +128,6 @@ Eight mock contracts in `contracts/` simulate external protocols. See `docs/arch
 ## Network Configuration
 
 Tests run on a local Hardhat network (chainId `1337`), fully self-contained. External protocols (Uniswap, Trader Joe, Permit2, WETH) are simulated by the mock contracts above rather than accessed via a mainnet fork — tests do not interact with any real protocol state.
-
-> The Hardhat config currently enables Arbitrum forking, but no test uses it. The forked state is effectively dead weight and could be removed.
-
-## Related Projects
-
-This project is part of the FUM monorepo. Sibling projects:
-
-- `../fum` — Frontend and source-of-truth contracts
-- `../fum_automation` — Automation service
-- `../fum_library` — Shared utilities (adapters, helpers, configs, ABIs)
 
 ## License
 

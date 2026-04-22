@@ -1,9 +1,16 @@
 # Changelog
 
-All notable changes to the F.U.M. project will be documented in this file.
+All notable changes to the FUM project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Removed
+
+- **`ParrisIslandStrategy.sol`** — deleted contract and corresponding test file from `fum_testing/`. Removed from `sync-contracts-to-ecosystem.js` (`TESTING_ONLY_CONTRACTS`) and from `.gitignore`. The contract was a skeleton-stage v0.4.0 advanced strategy, never deployed to any chain and never integrated into the automation service. It predated BabyStepsStrategy's parameter simplification (~10 → 6) and would have required substantial rewrites to revive. Git history preserves the implementation.
+- **`'fed'` strategy fallback in `StrategyConfigPanel.js`** — removed the dead-code fallback that defaulted `selectedStrategy = 'fed'` when a vault had `hasActiveStrategy` but no strategy details. The Fed strategy was never implemented (no contract, no config integration), and the fallback was never reached in normal flow.
 
 ## [2.0.0] - 2026-04-17
 
@@ -23,7 +30,7 @@ Major release spanning multi-platform support (Uniswap V4, Trader Joe V2.2), exe
 
 ### Per-Vault Signer & Executor Funding
 
-- **VaultFactory v2.0.0**: `VaultInfo` struct gains `executorIndex` (monotonic counter assigned at `createVault`) for deterministic per-vault executor wallet derivation from an xpub/mnemonic. Added `getVersion()` returning `"2.0.0"`.
+- **VaultFactory v2.0.0**: `VaultInfo` struct gains `executorIndex` (monotonic counter assigned at `createVault`) for deterministic per-vault executor wallet derivation from an xpub/mnemonic.
 - **Active Vault Registry**: VaultFactory now tracks the working set of vaults that have executors set. `registerActiveVault`/`deregisterActiveVault` (vault-callable only), `activeVaults[]`, `activeVaultIndex` mapping (1-indexed), `getActiveVaults()`, `getActiveVaultCount()`.
 - **PositionVault**: `setExecutor(address)` is now `payable` — `msg.value` is forwarded to the executor for initial gas funding. On first activation (executor `0x0` → non-zero) the vault registers with the factory's active-vault registry; `removeExecutor` deregisters.
 - **PositionVault**: new `fundExecutor(uint256 amount) payable onlyAuthorized` for on-demand/automated top-ups; emits new `ExecutorFunded` event.
@@ -32,6 +39,12 @@ Major release spanning multi-platform support (Uniswap V4, Trader Joe V2.2), exe
 
 - BabyStepsStrategy bumped to 2.0.0 (source: `BabyStepsStrategy.sol`).
 - ParrisIslandStrategy advanced to v0.4.0 (still in development).
+
+### On-Chain Version Constants
+
+- Added `string public constant VERSION = "2.0.0"` to all production-ready deployed contracts: PositionVault, VaultFactory, TJPositionManager, TJPositionProxy, UniversalRouterValidator, UniswapV3PositionValidator, UniswapV4PositionValidator, TJSwapValidator, TJPositionValidator, MerklIncentiveValidator. BabyStepsStrategy already at 2.0.0; ParrisIslandStrategy stays at 0.4.0 (in development).
+- Removed the redundant `getVersion()` wrapper from BabyStepsStrategy and ParrisIslandStrategy — the public constant's auto-generated getter (`VERSION()`) is used instead, matching the pattern for all other contracts.
+- Unit tests updated: all 12 contracts now assert on `contract.VERSION()`.
 
 ### Frontend — Automation UX
 

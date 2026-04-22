@@ -1,517 +1,311 @@
 <!-- Source: src/helpers/tokenHelpers.js -->
 # Token Helpers API
 
-Token management utilities for querying, filtering, and managing token configurations across multiple chains.
+Token management utilities for querying token configurations and addresses across multiple chains.
 
 ## Overview
 
-The Token Helpers module provides comprehensive utilities for working with ERC-20 tokens in the FUM Library. It manages token metadata, chain-specific addresses, and token classifications (stablecoins vs. volatile tokens).
+The Token Helpers module provides utilities for working with ERC-20 tokens in the FUM Library. It manages token metadata, chain-specific addresses, and token classifications (native vs wrapped, stablecoin vs volatile). All lookup functions use fail-fast validation — invalid inputs and missing tokens throw descriptive errors.
+
+## Exports
+
+```javascript
+import {
+  // Native / wrapped native utilities
+  isWrappedNativeToken,
+  getWrappedNativeAddress,
+  getWrappedNativeSymbol,
+  getNativeSymbol,
+  getNativeTokenForChain,
+  isNativeToken,
+  // Symbol / address lookups
+  getAllTokenSymbols,
+  getAllTokens,
+  getTokenBySymbol,
+  getTokensBySymbol,
+  getTokenByAddress,
+  getTokenAddress,
+  getTokenAddresses,
+  // Chain-based filters
+  getTokensByChain,
+  areTokensSupportedOnChain,
+  // Stablecoin helpers
+  getStablecoins,
+  isStablecoin,
+  detectStablePair,
+  // Filtering / validation
+  getTokensByType,
+  validateTokensExist,
+  // External service mapping
+  getCoingeckoId,
+} from 'fum_library/helpers/tokenHelpers';
+```
 
 ## Functions
 
----
+### getAllTokens
 
-## getAllTokens
+Return all configured tokens (including dynamically-generated wrapped-native entries).
 
-Get all configured tokens.
-
-### Signature
 ```javascript
 getAllTokens(): Object
 ```
 
-### Parameters
+Returns an object keyed by symbol:
 
-None
-
-### Returns
-
-`Object` - Token object with token symbols as keys, each containing name, symbol, decimals, addresses, and metadata
-
-### Return Object Structure
 ```javascript
 {
-  [symbol]: {
-    symbol: string,           // Token symbol (e.g., "USDC")
-    name: string,            // Full token name
-    decimals: number,        // Token decimals
-    addresses: {             // Chain-specific addresses
-      [chainId]: string      // Contract address on specific chain
-    },
-    isStablecoin: boolean,   // Token classification
-    logoURI?: string         // Optional logo URL
-  }
+  ETH: { symbol: "ETH", name: "Ether", decimals: 18, isNative: true, wrappedAddresses: {...} },
+  WETH: { symbol: "WETH", name: "Wrapped Ether", decimals: 18, isNative: false, addresses: {...} },
+  USDC: { symbol: "USDC", name: "USD Coin", decimals: 6, isStablecoin: true, addresses: {...} },
+  // ...
 }
 ```
 
-### Examples
-
-```javascript
-// Get all configured tokens
-const tokens = getAllTokens();
-// Returns: { 
-//   ETH: { symbol: "ETH", name: "Ethereum", decimals: 18, addresses: {...} },
-//   USDC: { symbol: "USDC", name: "USD Coin", decimals: 6, addresses: {...} },
-//   ...
-// }
-
-// Iterate through all tokens
-Object.values(getAllTokens()).forEach(token => {
-  console.log(`${token.name} (${token.symbol})`);
-});
-```
-
-### Side Effects
-None - Pure function
+Pure function — no side effects.
 
 ---
 
-## getTokenBySymbol
+### getAllTokenSymbols
 
-Get token information by its symbol.
-
-### Signature
-```javascript
-getTokenBySymbol(symbol: string): Object | null
-```
-
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| symbol | `string` | Yes | - | Token symbol (case-sensitive) |
-
-### Returns
-
-`Object | null` - Token object containing all token metadata - null if not found
-
-### Examples
+All configured token symbols (including wrapped natives).
 
 ```javascript
-// Get USDC token information
-const usdc = getTokenBySymbol('USDC');
-// Returns: { 
-//   symbol: "USDC", 
-//   name: "USD Coin", 
-//   decimals: 6,
-//   isStablecoin: true,
-//   addresses: { 1: "0xA0b8...", 137: "0x2791..." }
-// }
-
-// Handle unknown token
-const token = getTokenBySymbol('UNKNOWN');
-if (!token) {
-  console.error('Token not found');
-}
+getAllTokenSymbols(): string[]
 ```
 
-### Important Notes
-
-⚠️ **WARNING**: Token symbols are case-sensitive. Always use the exact casing (e.g., "USDC" not "usdc").
-
-### Side Effects
-None - Pure function
+Returns e.g. `['ETH', 'WETH', 'USDC', 'USDT', 'DAI', 'WBTC', 'AVAX', 'WAVAX', ...]`.
 
 ---
 
-## getTokenAddress
+### getTokenBySymbol
 
-Get token contract address for a specific chain.
-
-### Signature
-```javascript
-getTokenAddress(symbol: string, chainId: number): string | null
-```
-
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| symbol | `string` | Yes | - | Token symbol (case-sensitive) |
-| chainId | `number` | Yes | - | Chain ID where the token address is needed |
-
-### Returns
-
-`string | null` - Token contract address (0x-prefixed) - null if not available on the chain
-
-### Examples
+Look up a token by symbol.
 
 ```javascript
-// Get USDC address on Ethereum mainnet
-const usdcAddress = getTokenAddress('USDC', 1);
-// Returns: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-
-// Check if token exists on chain before using
-const tokenAddress = getTokenAddress('DAI', chainId);
-if (tokenAddress) {
-  const contract = new ethers.Contract(tokenAddress, ERC20ABI, provider);
-}
+getTokenBySymbol(symbol: string): Object
 ```
 
-### Side Effects
-None - Pure function
+Returns the full token object. Also resolves `wrappedSymbol` lookups — e.g. `getTokenBySymbol('WETH')` returns the ETH token config with `symbol: 'WETH'`, `isNative: false`, and `addresses` populated from `wrappedAddresses`.
+
+**Throws** if the symbol is missing, not a string, or not found.
 
 ---
 
-## getStablecoins
+### getTokensBySymbol
 
-Get all tokens classified as stablecoins.
-
-### Signature
-```javascript
-getStablecoins(): Array<Object>
-```
-
-### Parameters
-
-None
-
-### Returns
-
-`Array<Object>` - Array of token objects that are classified as stablecoins
-
-### Examples
+Batch lookup. Returns `{ [symbol]: tokenObject }`.
 
 ```javascript
-// Get all stablecoin tokens
-const stablecoins = getStablecoins();
-// Returns: [
-//   { symbol: "USDC", name: "USD Coin", isStablecoin: true, ... },
-//   { symbol: "USDT", name: "Tether", isStablecoin: true, ... },
-//   { symbol: "DAI", name: "Dai", isStablecoin: true, ... }
-// ]
-
-// Get stablecoin symbols for a selector
-const stablecoinOptions = getStablecoins().map(token => ({
-  value: token.symbol,
-  label: `${token.name} (${token.symbol})`
-}));
+getTokensBySymbol(symbols: string[]): Object
 ```
 
-### Side Effects
-None - Pure function
+**Throws** if any symbol is not found (fails fast — no partial results).
 
 ---
 
-## areTokensSupportedOnChain
+### getTokenByAddress
 
-Check if all specified tokens are available on a chain.
+Reverse lookup: address → token config.
 
-### Signature
+```javascript
+getTokenByAddress(address: string, chainId: number): Object
+```
+
+Address comparison is case-insensitive. Returns a modified copy for wrapped-native addresses (`isNative: false`, `symbol: wrappedSymbol`).
+
+**Throws** if no token is found at that address on the given chain.
+
+---
+
+### getTokenAddress
+
+Get a token's contract address on a specific chain.
+
+```javascript
+getTokenAddress(symbol: string, chainId: number): string
+```
+
+For native tokens (ETH, AVAX), returns the `AddressZero` sentinel stored in config (used by V4 native pools). Chain support is verified against `wrappedAddresses[chainId]` for native tokens.
+
+**Throws** if the symbol is unknown or the token has no address on the chain.
+
+---
+
+### getTokenAddresses
+
+Batch variant of `getTokenAddress`.
+
+```javascript
+getTokenAddresses(symbols: string[], chainId: number): Object
+```
+
+Returns `{ [symbol]: address }` — includes native tokens with their zero-address sentinel. **Throws** if any symbol isn't available on the chain.
+
+---
+
+### areTokensSupportedOnChain
+
 ```javascript
 areTokensSupportedOnChain(symbols: string[], chainId: number): boolean
 ```
 
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| symbols | `string[]` | Yes | - | Array of token symbols to check |
-| chainId | `number` | Yes | - | Chain ID to check against |
-
-### Returns
-
-`boolean` - True if ALL tokens are supported on the chain, false if any are missing
-
-### Examples
-
-```javascript
-// Check if token pair is available on Polygon
-const tokensAvailable = areTokensSupportedOnChain(['USDC', 'ETH'], 137);
-if (!tokensAvailable) {
-  console.error('Not all tokens available on this chain');
-}
-
-// Validate token selection for a specific chain
-const selectedTokens = ['DAI', 'USDC', 'WBTC'];
-if (areTokensSupportedOnChain(selectedTokens, chainId)) {
-  proceedWithStrategy(selectedTokens);
-}
-```
-
-### Side Effects
-None - Pure function
+Returns `true` only if every symbol has an address on the chain. Does not throw for unknown symbols — those simply cause `false`.
 
 ---
 
-## getTokenByAddress
-
-Look up token information by its contract address.
-
-### Signature
-```javascript
-getTokenByAddress(address: string, chainId: number): Object | null
-```
-
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| address | `string` | Yes | - | Token contract address (0x-prefixed) |
-| chainId | `number` | Yes | - | Chain ID where the address exists |
-
-### Returns
-
-`Object | null` - Token object with all metadata - null if not found
-
-### Examples
+### validateTokensExist
 
 ```javascript
-// Look up token by its contract address
-const token = getTokenByAddress('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', 1);
-// Returns: { symbol: "USDC", name: "USD Coin", ... }
-
-// Identify unknown token from transaction
-const unknownToken = getTokenByAddress(event.args.token, chainId);
-if (unknownToken) {
-  console.log(`Received ${unknownToken.symbol}`);
-} else {
-  console.log('Unknown token');
-}
+validateTokensExist(symbols: string[]): boolean
 ```
 
-### Important Notes
-
-The address comparison is case-insensitive to handle different address formats.
-
-### Side Effects
-None - Pure function
+Returns `true` if every symbol is configured in `tokens.js`. **Throws** for validation errors (non-array, non-string entries, etc.).
 
 ---
 
-## registerToken
+### getTokensByChain
 
-Register a new token or update an existing one.
-
-### Signature
-```javascript
-registerToken(token: Object): boolean
-```
-
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| token | `Object` | Yes | - | Token configuration object |
-| token.symbol | `string` | Yes | - | Token symbol (will be used as key) |
-| token.name | `string` | No | - | Human-readable token name |
-| token.decimals | `number` | No | - | Number of decimals for the token |
-| token.addresses | `Object` | No | - | Chain ID to address mapping |
-| token.isStablecoin | `boolean` | No | false | Whether the token is a stablecoin |
-| token.logoURI | `string` | No | - | URL to token logo image |
-
-### Returns
-
-`boolean` - True if registration successful, false if invalid input
-
-### Examples
+All tokens that have an address on a given chain.
 
 ```javascript
-// Register a new token
-registerToken({
-  symbol: 'NEWTOKEN',
-  name: 'New Token',
-  decimals: 18,
-  addresses: {
-    1: '0x1234...5678',
-    137: '0x8765...4321'
-  },
-  isStablecoin: false,
-  logoURI: 'https://example.com/logo.png'
-});
-
-// Update existing token with new chain
-const weth = getTokenBySymbol('WETH');
-registerToken({
-  ...weth,
-  addresses: {
-    ...weth.addresses,
-    42161: '0xNewArbitrumAddress'
-  }
-});
+getTokensByChain(chainId: number): Object[]
 ```
-
-### Side Effects
-Modifies the internal tokens configuration object
 
 ---
 
-## getTokensForChain
+### getTokensByType
 
-Get all tokens available on a specific chain.
-
-### Signature
-```javascript
-getTokensForChain(chainId: number): Array<Object>
-```
-
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| chainId | `number` | Yes | - | Chain ID to filter tokens by |
-
-### Returns
-
-`Array<Object>` - Array of token objects that have addresses on the specified chain
-
-### Examples
+Filter by stablecoin flag.
 
 ```javascript
-// Get all tokens on Polygon
-const polygonTokens = getTokensForChain(137);
-// Returns array of tokens with Polygon addresses
-
-// Build token selector for current chain
-const availableTokens = getTokensForChain(chainId).map(token => ({
-  value: token.symbol,
-  label: token.name,
-  address: token.addresses[chainId],
-  decimals: token.decimals
-}));
+getTokensByType(isStablecoin: boolean): Object[]
 ```
 
-### Side Effects
-None - Pure function
+Returns stablecoin or non-stablecoin tokens depending on the flag.
 
 ---
 
-## getAllTokenSymbols
+### getStablecoins
 
-Get all configured token symbols.
-
-### Signature
-```javascript
-getAllTokenSymbols(): Array<string>
-```
-
-### Parameters
-
-None
-
-### Returns
-
-`Array<string>` - Array of all configured token symbols
-
-### Examples
+Shorthand for `getTokensByType(true)` returned as an object keyed by symbol.
 
 ```javascript
-// Get all token symbols
-const symbols = getAllTokenSymbols();
-// Returns: ['ETH', 'USDC', 'USDT', 'DAI', 'WBTC', ...]
-
-// Check if a symbol exists
-const supportedSymbols = getAllTokenSymbols();
-if (supportedSymbols.includes(userInput.toUpperCase())) {
-  processToken(userInput);
-}
+getStablecoins(): Object
 ```
-
-### Side Effects
-None - Pure function
 
 ---
 
-## getTokensByType
-
-Filter tokens by their type classification.
-
-### Signature
-```javascript
-getTokensByType(isStablecoin: boolean): Array<Object>
-```
-
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| isStablecoin | `boolean` | Yes | - | True to get stablecoins, false to get non-stablecoins |
-
-### Returns
-
-`Array<Object>` - Array of token objects matching the type criteria
-
-### Examples
+### isStablecoin
 
 ```javascript
-// Get all non-stablecoin tokens
-const volatileTokens = getTokensByType(false);
-// Returns tokens like ETH, WBTC, etc.
-
-// Separate tokens by type for different strategies
-const stables = getTokensByType(true);
-const volatile = getTokensByType(false);
-
-console.log(`${stables.length} stablecoins available`);
-console.log(`${volatile.length} volatile tokens available`);
+isStablecoin(symbol: string): boolean
 ```
 
-### Side Effects
-None - Pure function
+Returns `true` for stablecoin symbols (USDC, USDT, DAI, etc.). **Throws** if the symbol is not found.
 
 ---
 
-## Type Definitions
+### detectStablePair
 
-```typescript
-// For TypeScript users
-interface TokenConfig {
-  symbol: string;
-  name: string;
-  decimals: number;
-  addresses: Record<number, string>;
-  isStablecoin?: boolean;
-  logoURI?: string;
-}
+Given two token addresses and a chainId, check whether both are stablecoins.
 
-interface TokenAddresses {
-  [chainId: number]: string;
-}
-
-type TokenSymbol = string;
-type TokenAddress = string;
+```javascript
+detectStablePair(tokenAddressA: string, tokenAddressB: string, chainId: number): boolean
 ```
+
+---
+
+### isNativeToken / isWrappedNativeToken
+
+```javascript
+isNativeToken(symbol: string): boolean         // true for ETH, AVAX
+isWrappedNativeToken(symbol: string): boolean  // true for WETH, WAVAX
+```
+
+Both throw if the symbol is not configured.
+
+---
+
+### getNativeSymbol / getWrappedNativeSymbol
+
+```javascript
+getNativeSymbol(chainId: number): string           // 'ETH', 'AVAX'
+getWrappedNativeSymbol(chainId: number): string    // 'WETH', 'WAVAX'
+```
+
+---
+
+### getNativeTokenForChain
+
+Full native token config for the chain.
+
+```javascript
+getNativeTokenForChain(chainId: number): Object
+```
+
+Returns the token object for the chain's native currency (ETH on Arbitrum, AVAX on Avalanche).
+
+---
+
+### getWrappedNativeAddress
+
+Wrapped native contract address on the chain.
+
+```javascript
+getWrappedNativeAddress(chainId: number): string
+```
+
+---
+
+### getCoingeckoId
+
+Map a token symbol to its CoinGecko ID for price lookups.
+
+```javascript
+getCoingeckoId(symbol: string): string
+```
+
+Used internally by `fum_library/services/coingecko`'s `fetchTokenPrices`. **Throws** if the symbol has no CoinGecko mapping.
+
+---
 
 ## Common Patterns
 
 ### Token Validation for Strategies
+
 ```javascript
-// Validate tokens for a specific strategy on a chain
 function validateStrategyTokens(tokens, chainId, requireStablecoin = false) {
-  // Check if all tokens exist
-  const allExist = tokens.every(symbol => getTokenBySymbol(symbol));
-  if (!allExist) return { valid: false, error: 'Unknown token' };
-  
-  // Check if all tokens are on the chain
+  // Verify all tokens exist in config
+  try {
+    validateTokensExist(tokens);
+  } catch (error) {
+    return { valid: false, error: error.message };
+  }
+
+  // Verify chain support
   if (!areTokensSupportedOnChain(tokens, chainId)) {
     return { valid: false, error: 'Not all tokens available on chain' };
   }
-  
-  // Check stablecoin requirement
+
   if (requireStablecoin) {
-    const hasStable = tokens.some(symbol => {
-      const token = getTokenBySymbol(symbol);
-      return token && token.isStablecoin;
-    });
+    const hasStable = tokens.some(symbol => isStablecoin(symbol));
     if (!hasStable) {
       return { valid: false, error: 'At least one stablecoin required' };
     }
   }
-  
+
   return { valid: true };
 }
 ```
 
 ### Multi-Chain Token Discovery
+
 ```javascript
-// Find which chains support a specific token
 function getTokenAvailability(symbol) {
   const token = getTokenBySymbol(symbol);
-  if (!token) return [];
-  
-  return Object.entries(token.addresses).map(([chainId, address]) => ({
+  return Object.entries(token.addresses || token.wrappedAddresses).map(([chainId, address]) => ({
     chainId: parseInt(chainId),
-    chainName: getChainName(parseInt(chainId)),
     address
   }));
 }
@@ -519,7 +313,7 @@ function getTokenAvailability(symbol) {
 
 ## See Also
 
-- [`chainHelpers`](./chain-helpers.md) - Chain configuration utilities
-- [`formatHelpers`](./format-helpers.md) - Token amount formatting
+- [`chainHelpers`](./chain-helpers.md) — Chain configuration utilities
+- [`formatHelpers`](./format-helpers.md) — Value formatting
+- [`services/coingecko`](../services/coingecko.md) — Uses `getCoingeckoId` internally
 - [ERC-20 Token Standard](https://eips.ethereum.org/EIPS/eip-20)
-- [Token Lists](https://tokenlists.org/) - Standard for token metadata

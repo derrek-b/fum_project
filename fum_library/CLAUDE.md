@@ -45,7 +45,7 @@ import contracts from 'fum_library/artifacts/contracts';
 
 Detailed docs in `docs/architecture/`:
 - **overview.md** — Module structure, initialization, dependency flow, build system
-- **adapters.md** — PlatformAdapter interface (27 required + 4 optional methods), data shapes, automation usage flows
+- **adapters.md** — PlatformAdapter interface (29 required: 27 automation + 2 frontend display, plus 4 optional incentive methods), data shapes, automation usage flows
 - **helpers.md** — Per-helper module overview with function summaries
 - **services.md** — External API integrations (CoinGecko, The Graph, block explorer), caching strategy
 - **blockchain.md** — Provider creation, contract interaction, wallet management

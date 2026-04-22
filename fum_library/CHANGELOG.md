@@ -1,9 +1,29 @@
 # Changelog
 
-All notable changes to the F.U.M. library will be documented in this file.
+All notable changes to the FUM Library will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- **`@vitest/coverage-v8` dev dependency** — `npm run test:coverage` now actually works (was previously failing on a missing dependency).
+
+### Removed
+
+- **Auto-generated module reference** — deleted `scripts/generate-docs.js`, `docs/api-reference/modules.md`, and the `docs` npm script (and its hook in the `build` chain). The generator produced a mechanical exports index that duplicated (and occasionally contradicted) the hand-curated per-module docs under `docs/api-reference/` and `docs/architecture/`. Doc freshness is now handled entirely by the `/commit` and `/update-brain` skills across all docs, giving one consistency model instead of two. For a complete grep of exports, search source directly (`grep -rn "^export" src/`).
+- **Parris Island Strategy and The Fed Strategy configs** — removed `parris` and `fed` strategy entries from `src/configs/strategies.js`, removed parameter mapping logic from `src/helpers/strategyHelpers.js`, and removed corresponding tests from `test/unit/helpers/strategyHelpers.test.js`. Neither was integrated into the production system: Parris Island had a contract + skeleton, The Fed had no contract at all. Both predated BabyStepsStrategy's parameter simplification (~10 → 6) and would require substantial rewrites against the current `StrategyBase` interface to be revived. Git history preserves the prior implementations.
+- **Broken `registerAdapter` wrapper** — deleted from `src/adapters/index.js`. It forwarded to a non-existent `AdapterFactory.registerAdapter` method and threw `TypeError` on call; nothing in the monorepo invoked it. Use `AdapterFactory.registerAdapterForTestingOnly(platformId, AdapterClass)` directly when registering adapters in tests or plugins.
+- **Broken `./artifacts` package export and duplicate `./artifacts/contracts.js`** — `./artifacts` pointed at a non-existent `dist/artifacts/index.js`; `./artifacts/contracts.js` was a redundant duplicate of `./artifacts/contracts`. Consumers should import from `fum_library/artifacts/contracts`.
+- **Dead `test:integration` and `test:unit` npm scripts** — `test:integration` ran `vitest run integration` against a non-existent `test/integration/` directory and depended on a removed helper script (`scripts/test-integration.js`, also deleted). `test:unit` was redundant with the bare `test` script (same scope).
+- **Unused `prepublishOnly` script** — package is private (`"private": true`), never published to npm.
+
+### Fixed
+
+- **TraderJoeV2_2Adapter JSDoc** — corrected from "on Arbitrum" to "on Avalanche" (the adapter's actual supported chain).
+- **"F.U.M." → "FUM" naming consistency** — JSDoc comments in `src/configs/{platforms,chains}.js` and `src/artifacts/contracts.js` (plus the templates in `fum/scripts/extract-abis.js` and `fum/scripts/deploy.js` that generate the artifacts file). Other docs and the README were updated to use "FUM Library" consistently.
 
 ## [2.0.0] - 2026-04-17
 

@@ -33,7 +33,7 @@ Throws if `window.ethereum` is not available (no browser wallet detected).
 
 #### createJsonRpcProvider(rpcUrl)
 
-Creates a JsonRpcProvider for server-side or direct RPC access. Validates URL format and tests connectivity with 2 retries.
+Creates a JsonRpcProvider for server-side or direct RPC access. Validates URL format and tests connectivity with one automatic retry (2 attempts total).
 
 ```javascript
 const provider = await createJsonRpcProvider('https://arb-mainnet.g.alchemy.com/v2/KEY');
@@ -144,19 +144,27 @@ Gets vault metadata from VaultFactory.
 
 ```javascript
 const info = await getVaultInfo('0xVault...', provider);
-// Returns: { owner, name, creationTime, creationBlock }
+// Returns: { owner, name, creationTime, creationBlock, executorIndex }
 ```
 
-#### getAuthorizedVaults(executorAddress, provider)
+#### getActiveVaults(provider)
 
-Finds all vaults that have authorized a specific executor address. Iterates through all vaults in the factory and checks each vault's `executor()`.
+Returns the list of vaults that currently have an executor set (i.e., automation enabled).
 
 ```javascript
-const vaults = await getAuthorizedVaults('0xExecutor...', provider);
+const active = await getActiveVaults(provider);
 // Returns: ['0xVault1...', '0xVault2...']
 ```
 
-Note: This iterates all vaults — performance scales linearly with total vault count.
+Backed by `VaultFactory.getActiveVaults()` — the factory maintains the index, so this is O(1) on the client side.
+
+#### getVaultExecutorIndex(vaultAddress, provider)
+
+Convenience accessor that reads only the `executorIndex` field from `getVaultInfo`.
+
+```javascript
+const index = await getVaultExecutorIndex('0xVault...', provider);
+```
 
 #### getContractInfoByAddress(address)
 

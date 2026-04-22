@@ -266,6 +266,8 @@ Token symbols are mapped to CoinGecko IDs using the `getCoingeckoId()` function 
 
 The service uses fail-fast error handling - it never returns stale cached data on API failures. This is intentional for financial applications where stale prices could lead to incorrect trading decisions.
 
+> **Error message wrapping.** All errors thrown from inside `fetchTokenPrices` are caught and re-thrown as `new Error('Failed to fetch current token prices: ' + innerError.message)`. The substring checks below all use `error.message.includes(...)` because each "inner" message appears as a substring of the outer wrapper. Exact-match comparisons (`error.message === '...'`) will not work for any of these error types.
+
 ```javascript
 import { fetchTokenPrices, CACHE_DURATIONS } from 'fum_library/services/coingecko';
 

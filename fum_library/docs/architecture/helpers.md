@@ -16,7 +16,7 @@ src/helpers/
 └── Permit2Helper.js     # Permit2 nonce, signature, calldata wrapping
 ```
 
-All helpers use fail-fast validation — invalid inputs throw descriptive errors immediately.
+Most helpers use fail-fast validation — invalid inputs throw descriptive errors immediately. The `is*` predicate family (e.g., `isChainSupported`, `isLocalChain`, `isStablecoin`, `isNativeToken`, `isWrappedNativeToken`) returns `false` for unrecognized values rather than throwing.
 
 ---
 
@@ -63,7 +63,7 @@ All lookup functions throw descriptive errors when the chainId is invalid, the c
 
 **Source:** `src/helpers/tokenHelpers.js`
 
-Token data lookups against `configs/tokens.js`. The `registerToken()` function was removed — token config is immutable.
+Token data lookups against `configs/tokens.js`. Token config is immutable — there is no mutation API.
 
 ### Key Exports
 
@@ -137,14 +137,24 @@ Strategy template lookups and parameter validation against `configs/strategies.j
 
 | Function | Description |
 |---|---|
-| `lookupAllStrategyIds()` | All strategy IDs including 'none' |
-| `lookupAvailableStrategies()` | Strategy configs excluding 'none' |
-| `lookupStrategyById(strategyId)` | Single strategy config |
-| `lookupStrategyParameters(strategyId)` | Parameter definitions for a strategy |
+| `validateIdString(id)` | Validate a strategy/template ID string |
+| `lookupAllStrategyIds()` | All strategy IDs including `'none'` |
+| `lookupAvailableStrategies()` | Strategy configs excluding `'none'` |
+| `getStrategyDetails(strategyId)` | Full single-strategy config (throws if not found) |
+| `getStrategyTemplates(strategyId)` | Predefined templates for a strategy |
+| `getTemplateDefaults(strategyId, templateId)` | Template parameter defaults (use `'custom'` for base defaults) |
+| `getParamDefaultValues(strategyId)` | Base default parameter values |
+| `getStrategyParameters(strategyId)` | Parameter definitions for a strategy |
+| `getStrategyParametersByGroup(strategyId, groupId)` | Parameters filtered by UI group |
+| `getStrategyParametersByContractGroup(strategyId, contractGroup)` | Parameters filtered by contract method group |
 | `validateStrategyParams(strategyId, params)` | Validate params against strategy rules |
-| `getDefaultStrategyParams(strategyId)` | Default parameter values |
+| `getParameterSetterMethod(strategyId, contractGroupId)` | Contract setter method name for a parameter group |
 | `shouldShowParameter(paramConfig, currentParams)` | Conditional parameter visibility |
-| `resolveTokenOptions(paramConfig, chainId)` | Resolve token options for selector params |
+| `formatParameterValue(value, paramConfig)` | Format a parameter value for display |
+| `getStrategyTokens(strategyId)` | Tokens supported by a strategy (resolves `tokenSupport` modes) |
+| `validateTokensForStrategy(vaultTokens, strategyTokens, chainId)` | Vault-token vs strategy-token compatibility |
+| `validatePositionsForStrategy(positions, pools, strategyTokens, chainId)` | Position-pool compatibility |
+| `mapStrategyParameters(strategyId, rawBytes)` | Decode on-chain parameter bytes to named params |
 
 ### Parameter Validation
 
@@ -207,6 +217,7 @@ Utilities for Uniswap's Permit2 token approval system, used by adapters when gen
 | `PERMIT2_ADDRESS` | Canonical Permit2 address (same on all EVM chains) |
 | `getPermit2Nonce(provider, owner, token, spender)` | Read current nonce from Permit2 contract |
 | `generatePermit2Signature(signer, chainId, token, amount, spender, nonce, deadline)` | Generate EIP-712 typed signature |
+| `encodePermit2Input(permitData, signature)` | Encode `PermitSingle` + signature for the Universal Router `PERMIT2_PERMIT` command |
 | `wrapWithPermit2(routerInterface, calldata, permitData, signature)` | Wrap router calldata with permit |
 
 ### Usage Flow

@@ -222,7 +222,7 @@ Returns `[]` if no pools match.
 #### Example
 
 ```javascript
-import { sortTokens } from 'fum_library/helpers/tokenHelpers';
+import { discoverV4Pools } from 'fum_library/services/theGraph';
 
 // Token order matters — ensure sorted low-to-high by address
 const weth = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';

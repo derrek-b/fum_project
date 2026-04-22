@@ -1,24 +1,29 @@
 # FUM Library Test Suite
 
-This directory contains the test suite for fum_library, using Hardhat to fork Arbitrum mainnet for realistic integration testing.
+This directory contains the test suite for fum_library, using Hardhat to fork Arbitrum or Avalanche mainnet for realistic integration testing. The chain to fork is selected via the `FORK_CHAIN` env var (`arbitrum` is the default; set `FORK_CHAIN=avalanche` to fork Avalanche on chain 1338).
 
 ## Structure
 
 ```
 test/
-├── setup/                    # Test configuration and utilities
-│   ├── hardhat-config.js    # Hardhat setup and blockchain utilities
-│   └── test-contracts.js    # Contract deployment logic
-├── unit/                    # Unit tests (pure functions)
-│   ├── adapters/           # Adapter unit tests (UniswapV3Adapter, etc.)
-│   ├── blockchain/         # Blockchain module tests
-│   ├── configs/            # Config module tests
-│   ├── helpers/            # Helper unit tests (Permit2Helper, etc.)
-│   └── services/           # Service unit tests
-├── test-env.js             # Main test environment setup
-├── setup.js                # Global test configuration
-├── .env.test               # Test environment variables
-└── .env.test.example       # Template for test env vars
+├── setup/                       # Test configuration and utilities
+│   ├── hardhat-config.js       # Hardhat setup, fork URL selection, test accounts
+│   ├── test-contracts.js       # Contract deployment logic
+│   ├── v3-setup.js             # Uniswap V3 test fixtures (pools, positions)
+│   ├── v4-setup.js             # Uniswap V4 test fixtures (pools, positions)
+│   └── traderjoe-setup.js      # Trader Joe V2.2 test fixtures (LB pairs, bin positions)
+├── unit/                       # Unit tests (pure functions)
+│   ├── adapters/              # Adapter unit tests (UniswapV3Adapter, etc.)
+│   ├── blockchain/            # Blockchain module tests
+│   ├── configs/               # Config module tests
+│   ├── helpers/               # Helper unit tests (Permit2Helper, etc.)
+│   └── services/              # Service unit tests
+├── global-setup-arbitrum.js   # Vitest global setup for the shared Arbitrum-fork node
+├── shared-state.js            # Cross-test shared state (snapshot IDs, deployed addresses)
+├── test-env.js                # Main test environment setup (setupTestEnvironment)
+├── setup.js                   # Vitest setup file (loads .env.test, configures fum_library)
+├── .env.test                  # Test environment variables
+└── .env.test.example          # Template for test env vars
 ```
 
 ## Quick Start

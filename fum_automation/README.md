@@ -2,6 +2,8 @@
 
 Automated liquidity management service for the F.U.M. (Friendly Uniswap Manager) protocol, handling position monitoring and lifecycle operations.
 
+> `fum_automation` is one subproject in the [fum_project monorepo](../README.md). The root README has the big-picture architecture and sibling-project overview; this doc covers `fum_automation` specifically.
+
 ## Overview
 
 The F.U.M. Automation service provides 24/7 automated management of liquidity positions across DeFi platforms. It monitors on-chain events, evaluates positions against strategy parameters, and executes rebalances, fee collection, and other optimization tasks.
@@ -28,39 +30,13 @@ The automation service consists of several core components:
 
 ## Prerequisites
 
-### Repository Structure
-
-The F.U.M. ecosystem requires repositories to be cloned as siblings:
-
-```
-code/
-├── fum/              # Frontend + Smart Contracts
-├── fum_library/      # Shared utilities (required)
-└── fum_automation/   # This repository
-```
-
-### fum_library Setup
-
-fum_library must be built before installing dependencies:
-
-```bash
-# Clone fum_library if not already present
-cd ..
-git clone https://github.com/derrek-b/fum_library.git
-
-# Build and pack the library
-cd fum_library
-npm install
-npm run build && npm pack
-
-# Return to fum_automation
-cd ../fum_automation
-```
+- **Node.js 22+** and npm
+- **fum_library built and packed** into this project — consumed as a local tarball (`file:../fum_library/fum_library-*.tgz`), never via `npm link`. After any change in `../fum_library`, run `cd ../fum_library && npm run pack` to rebuild the tarball and reinstall it here. See the [root README](../README.md) for the full monorepo convention.
 
 ## Installation
 
 ```bash
-# Install dependencies (requires fum_library to be built first)
+# Install dependencies (requires fum_library tarball to exist)
 npm install
 
 # Copy environment template

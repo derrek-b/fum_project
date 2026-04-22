@@ -128,7 +128,7 @@ const { signature, permitData } = await generatePermit2Signature(
   signer,
   42161,  // Arbitrum
   tokenAddress,
-  ethers.parseEther('100').toString(),
+  ethers.utils.parseEther('100').toString(),
   routerAddress,
   nonce,
   deadline
@@ -222,8 +222,8 @@ const wrappedCalldata = wrapWithPermit2(
   signature
 );
 
-// Execute transaction
-const tx = await vault.execute([universalRouterAddress], [wrappedCalldata], [0]);
+// Execute transaction through the vault — PositionVault.execute(targets, data)
+const tx = await vault.execute([universalRouterAddress], [wrappedCalldata]);
 ```
 
 ---
