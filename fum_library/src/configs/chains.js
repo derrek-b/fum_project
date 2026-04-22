@@ -1,6 +1,6 @@
 // src/configs/chains.js
 /**
- * Chain configuration for F.U.M. project
+ * Chain configuration for FUM project
  * Contains network-specific information for supported blockchains
  */
 

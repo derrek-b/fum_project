@@ -223,4 +223,4 @@ Adapters call these when building swap transactions:
 
 - [Architecture Overview](./overview.md) — Module structure and module summaries
 - [Services Architecture](./services.md) — External APIs that helpers interact with
-- [API Reference: Modules](../api-reference/modules.md) — Auto-generated function documentation
+- [API Reference Overview](../api-reference/overview.md) — Per-module function documentation

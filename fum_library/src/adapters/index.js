@@ -29,8 +29,3 @@ export const getAdapter = (platformId, chainId) => {
 export const getSupportedPlatforms = () => {
   return AdapterFactory.getSupportedPlatforms();
 };
-
-// Export a function to register a new adapter
-export const registerAdapter = (platformId, AdapterClass) => {
-  return AdapterFactory.registerAdapter(platformId, AdapterClass);
-};

@@ -8,7 +8,7 @@ Shared library consumed by both `fum` (frontend) and `fum_automation` (automatio
 ## Commands
 
 ```bash
-npm run build            # Build src/ → dist/ (simple copy + docs generation)
+npm run build            # Build src/ → dist/ (simple file copy)
 npm run pack             # Build + pack tarball + install into fum & fum_automation
 npm test                 # Vitest unit tests
 npm run test:unit        # Unit tests only

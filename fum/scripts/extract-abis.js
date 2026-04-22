@@ -121,7 +121,7 @@ function updateLibraryContracts(contractsAbi) {
     // Create the contract content
     const contractsContent = `// artifacts/contracts.js
       /**
-       * Contract ABIs and addresses for the F.U.M. project
+       * Contract ABIs and addresses for the FUM project
        * This file is auto-generated and should not be edited directly
        */
 

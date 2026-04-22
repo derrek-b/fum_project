@@ -286,4 +286,4 @@ Services work without configuration for operations that don't need API keys. Onl
 ## See Also
 
 - [Architecture Overview](./overview.md) — Module structure and initialization
-- [API Reference: Modules](../api-reference/modules.md) — Function-level documentation
+- [API Reference Overview](../api-reference/overview.md) — Per-module function documentation

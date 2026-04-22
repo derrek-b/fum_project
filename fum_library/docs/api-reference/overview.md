@@ -3,9 +3,7 @@
 
 Detailed API documentation for fum_library modules.
 
-## Module Reference
-
-- [Module Reference](./modules.md) — Auto-generated list of all files, imports, and exports (`npm run docs` to regenerate)
+> **Format note.** Each module entry below describes what the module does and lists its most commonly used exports for at-a-glance scanning. Entries are not exhaustive — follow the linked per-module doc for the complete export list. For a complete grep of every export, search the source directly (`grep -rn "^export" src/`).
 
 ## Adapters
 

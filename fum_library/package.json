@@ -26,9 +26,7 @@
     "./services/theGraph": "./dist/services/theGraph.js",
     "./services/merkl": "./dist/services/merkl.js",
     "./services/blockExplorer": "./dist/services/blockExplorer.js",
-    "./artifacts": "./dist/artifacts/index.js",
     "./artifacts/contracts": "./dist/artifacts/contracts.js",
-    "./artifacts/contracts.js": "./dist/artifacts/contracts.js",
     "./test/setup/hardhat-config": "./test/setup/hardhat-config.js",
     "./test/setup/test-contracts": "./test/setup/test-contracts.js",
     "./test/test-env": "./test/test-env.js"
@@ -42,15 +40,11 @@
     "hardhat.avalanche.config.cjs"
   ],
   "scripts": {
-    "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/ && npm run docs",
-    "docs": "node scripts/generate-docs.js",
-    "prepublishOnly": "npm run build",
+    "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/",
     "pack": "npm run build && npm pack && ([ -d ../fum ] && cd ../fum && npm uninstall fum_library 2>/dev/null; npm install file:../fum_library/fum_library-2.0.0.tgz --legacy-peer-deps && echo '  ✓ fum' || echo '  ⊘ fum (not found)') && ([ -d ../fum_automation ] && cd ../fum_automation && npm uninstall fum_library 2>/dev/null; npm install file:../fum_library/fum_library-2.0.0.tgz --include=dev && echo '  ✓ fum_automation' || echo '  ⊘ fum_automation (not found)') && echo '✅ fum_library pack complete'",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "test:integration": "node scripts/test-integration.js",
-    "test:unit": "vitest run unit"
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.0.0",
@@ -75,6 +69,7 @@
     "ethers": "^5.7.2"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^3.2.4",
     "chai": "^5.2.0",
     "dotenv": "^16.5.0",
     "ethers": "^5.7.2",

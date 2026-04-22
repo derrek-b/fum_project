@@ -1,6 +1,6 @@
 // src/configs/platforms.js
 /**
- * Platform configuration for F.U.M. project
+ * Platform configuration for FUM project
  * Contains metadata and information about supported DeFi platforms
  */
 

@@ -1,6 +1,6 @@
 // fum_library/adapters/TraderJoeV2_2Adapter.js
 /**
- * Adapter for Trader Joe V2.2 Liquidity Book on Arbitrum
+ * Adapter for Trader Joe V2.2 Liquidity Book on Avalanche
  *
  * Trader Joe V2.2 uses a bin-based concentrated liquidity system where:
  * - tokenX = lower address (equivalent to Uniswap's token0)
