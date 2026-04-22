@@ -13,7 +13,6 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
     "contracts:sync": "node scripts/sync-contracts-to-ecosystem.js",
     "contracts:test": "bash -c 'node scripts/sync-contracts-to-ecosystem.js --sync-only && cd ../fum_testing && npx hardhat test'",
     "contracts:test:coverage": "bash -c 'node scripts/sync-contracts-to-ecosystem.js --sync-only && cd ../fum_testing && npx hardhat coverage'",
