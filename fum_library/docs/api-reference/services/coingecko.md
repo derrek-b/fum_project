@@ -12,6 +12,7 @@ The CoinGecko service integrates with the CoinGecko API to provide token price d
 ```javascript
 import {
   configureCoingecko,
+  resetCoingeckoConfig,
   fetchTokenPrices,
   clearPriceCache,
   buildApiUrl,
@@ -25,7 +26,7 @@ import {
 
 ### configureCoingecko
 
-Set the module-level CoinGecko API key. Consumed by `buildApiUrl` (appended as the `x_cg_demo_api_key` query parameter) and therefore by every request `fetchTokenPrices` makes. If omitted, requests use the unauthenticated free tier.
+Set the module-level CoinGecko API key. Consumed by `buildApiUrl` (appended as the `x_cg_demo_api_key` query parameter) and therefore by every request `fetchTokenPrices` makes. The key is **required** — `buildApiUrl` throws if no key has been configured (see [buildApiUrl](#buildapiurl) Throws table). Call `configureCoingecko` (or `initFumLibrary({ coingeckoApiKey })`) once at app startup.
 
 ```javascript
 configureCoingecko({ apiKey?: string }): void
@@ -44,6 +45,20 @@ configureCoingecko({ apiKey: process.env.COINGECKO_API_KEY });
 ```
 
 > `initFumLibrary({ coingeckoApiKey })` calls this internally — prefer that entry point in app startup code.
+
+### resetCoingeckoConfig
+
+Clears the module-level API key, resetting the service to its unconfigured default. Intended for test isolation — call from `beforeEach`/`afterEach` so test order doesn't leak state.
+
+```javascript
+resetCoingeckoConfig(): void
+```
+
+#### Example
+```javascript
+import { resetCoingeckoConfig } from 'fum_library/services/coingecko';
+beforeEach(() => resetCoingeckoConfig());
+```
 
 ## Constants
 
@@ -225,6 +240,7 @@ buildApiUrl(endpoint: string, params?: Object): string
 | `Error` | Endpoint is not provided |
 | `Error` | Endpoint is not in approved ENDPOINTS list |
 | `Error` | Parameter value is null, undefined, or an object |
+| `Error` | No API key configured (call `configureCoingecko({ apiKey })` or `initFumLibrary({ coingeckoApiKey })` first) |
 
 #### Example
 

@@ -61,12 +61,13 @@ Before using API-dependent features, initialize the library with your API keys:
 import { initFumLibrary } from 'fum_library';
 
 // Initialize with API keys (call once at app startup).
-// Required:
-//   - alchemyApiKey:  required for production chains (Arbitrum, Avalanche). Not required for testing.
-//   - theGraphApiKey: subgraph queries (throws without)
-// Strongly recommended (technically optional, but unauthenticated rate limits may cause production/testing failures):
-//   - coingeckoApiKey
-//   - blockExplorerApiKey
+// Required (service throws if missing):
+//   - coingeckoApiKey: price fetches (throws without)
+//   - theGraphApiKey:  subgraph queries (throws without)
+//   - alchemyApiKey:   required for production chains (Arbitrum, Avalanche). Not required for testing.
+// Optional:
+//   - blockExplorerApiKey: only consumed by V4 native-ETH fee-tracking paths in parseClosureReceipt/parseCollectReceipt.
+//     Without it, ETH fees in those receipts degrade to null (graceful); all other code paths work unaffected.
 initFumLibrary({
   coingeckoApiKey: process.env.COINGECKO_API_KEY,
   alchemyApiKey: process.env.ALCHEMY_API_KEY,

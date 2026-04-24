@@ -78,9 +78,10 @@ Additional durations exist at 1s, 2s, 10s, and 15s intervals.
 ### Other Exports
 
 - `ENDPOINTS` — CoinGecko API endpoint constants (SIMPLE_PRICE, COIN_DETAILS, etc.)
-- `buildApiUrl(endpoint, params)` — Constructs validated CoinGecko URL with API key
+- `buildApiUrl(endpoint, params)` — Constructs validated CoinGecko URL with API key. Throws if no key is configured (fail-loud so callers don't silently hit the anonymous public tier).
 - `clearPriceCache()` — Empties the cache
 - `priceCache` — Direct cache access (for debugging)
+- `resetCoingeckoConfig()` — Clears the module-level API key (for testing)
 
 ### Error Handling
 
@@ -151,6 +152,10 @@ const tokenIds = await getV4PositionsByOwner('0xVault...', 42161, { limit: 100 }
 Each function looks up the subgraph ID from platform metadata (`getPlatformMetadata(platformId).subgraphs[chainId]`). The subgraph config includes:
 - `id` — The Graph subgraph deployment ID
 - `queryType` — `'messari'` or `'uniswap'` (determines GraphQL query shape)
+
+### Other Exports
+
+- `resetTheGraphConfig()` — Clears the module-level API key (for testing)
 
 ---
 

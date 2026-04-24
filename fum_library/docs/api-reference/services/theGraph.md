@@ -12,6 +12,7 @@ This module provides functions to query historical pool data (TVL, age) and Unis
 ```javascript
 import {
   configureTheGraph,
+  resetTheGraphConfig,
   getPoolTVLAverage,
   getPoolAge,
   discoverV4Pools,
@@ -46,6 +47,20 @@ import { configureTheGraph } from 'fum_library/services/theGraph';
 
 // Typically called once at app startup (or via initFumLibrary)
 configureTheGraph({ apiKey: process.env.THEGRAPH_API_KEY });
+```
+
+### resetTheGraphConfig
+
+Clears the module-level API key, resetting the service to its unconfigured default. Intended for test isolation — call from `beforeEach`/`afterEach` so test order doesn't leak state.
+
+```javascript
+resetTheGraphConfig(): void
+```
+
+#### Example
+```javascript
+import { resetTheGraphConfig } from 'fum_library/services/theGraph';
+beforeEach(() => resetTheGraphConfig());
 ```
 
 ---
