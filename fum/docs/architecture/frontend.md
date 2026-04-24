@@ -19,9 +19,14 @@ Redux Provider (store)
 
 **Module-level initialization** (outside React tree):
 ```javascript
+// _app.js validates all four NEXT_PUBLIC_* keys at module load and throws
+// a clear "Missing required environment variables: ..." error if any are
+// missing (guarded with `NODE_ENV !== 'test'` so unit tests can import freely).
 initFumLibrary({
   coingeckoApiKey: process.env.NEXT_PUBLIC_COINGECKO_API_KEY,
-  alchemyApiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY
+  alchemyApiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
+  theGraphApiKey: process.env.NEXT_PUBLIC_THEGRAPH_API_KEY,
+  blockExplorerApiKey: process.env.NEXT_PUBLIC_BLOCK_EXPLORER_API_KEY,
 });
 ```
 
