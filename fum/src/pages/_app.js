@@ -13,10 +13,32 @@ import { initFumLibrary } from 'fum_library';
 import "bootstrap/dist/css/bootstrap.min.css";
 import "../styles/globals.css";
 
+// Validate required environment variables before initializing fum_library.
+// Fails loud at module-load time so devs hit a clear error during startup
+// instead of a runtime throw deep in a V4 flow (the service guards in
+// theGraph.js, blockExplorer.js, coingecko.js would otherwise fire later).
+const REQUIRED_ENV_VARS = {
+  NEXT_PUBLIC_COINGECKO_API_KEY: process.env.NEXT_PUBLIC_COINGECKO_API_KEY,
+  NEXT_PUBLIC_ALCHEMY_API_KEY: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
+  NEXT_PUBLIC_THEGRAPH_API_KEY: process.env.NEXT_PUBLIC_THEGRAPH_API_KEY,
+  NEXT_PUBLIC_BLOCK_EXPLORER_API_KEY: process.env.NEXT_PUBLIC_BLOCK_EXPLORER_API_KEY,
+};
+const missingEnvVars = Object.entries(REQUIRED_ENV_VARS)
+  .filter(([, value]) => !value)
+  .map(([name]) => name);
+if (missingEnvVars.length > 0 && process.env.NODE_ENV !== 'test') {
+  throw new Error(
+    `Missing required environment variables: ${missingEnvVars.join(', ')}. ` +
+    `Set them in .env.local (development) or in your deployment environment (production).`
+  );
+}
+
 // Initialize fum_library with API keys
 initFumLibrary({
-  coingeckoApiKey: process.env.NEXT_PUBLIC_COINGECKO_API_KEY,
-  alchemyApiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
+  coingeckoApiKey: REQUIRED_ENV_VARS.NEXT_PUBLIC_COINGECKO_API_KEY,
+  alchemyApiKey: REQUIRED_ENV_VARS.NEXT_PUBLIC_ALCHEMY_API_KEY,
+  theGraphApiKey: REQUIRED_ENV_VARS.NEXT_PUBLIC_THEGRAPH_API_KEY,
+  blockExplorerApiKey: REQUIRED_ENV_VARS.NEXT_PUBLIC_BLOCK_EXPLORER_API_KEY,
 });
 
 // Custom fallback component for React errors
