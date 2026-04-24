@@ -604,4 +604,13 @@ describe('AdapterFactory - Unit Tests', () => {
       expect(AdapterFactory.hasAdapter('mock')).toBe(true);
     });
   });
+
+  describe('registerAdapterForTestingOnly', () => {
+    it('throws when platformId or AdapterClass is missing', () => {
+      expect(() => AdapterFactory.registerAdapterForTestingOnly(null, MockAdapter))
+        .toThrow('Platform ID and Adapter class are required');
+      expect(() => AdapterFactory.registerAdapterForTestingOnly('test', null))
+        .toThrow('Platform ID and Adapter class are required');
+    });
+  });
 });

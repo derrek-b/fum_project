@@ -4,7 +4,7 @@
  * Tests for chain configuration utilities and validation functions
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import {
   validateChainId,
   getChainConfig,
@@ -1000,5 +1000,48 @@ describe('Chain Helpers', () => {
         expect(() => getExpectedBlockMs(-1)).toThrow('chainId must be greater than 0');
       });
     });
+  });
+});
+
+// Config-injection tests: guards that fire when a chain entry exists but a
+// required field (minExecutorBalance, maxExecutorBalance, maxPriorityFeePerGas)
+// is missing or invalid. Real chains all have these, so we inject a synthetic
+// chain. chainHelpers is pre-loaded via init.js, hence doMock + resetModules.
+describe('chainHelpers — config-injection tests', () => {
+  let mockedChainHelpers;
+  const BROKEN_CHAIN_ID = 77777;
+
+  beforeAll(async () => {
+    vi.doMock('../../../src/configs/chains.js', () => ({
+      default: {
+        [BROKEN_CHAIN_ID]: {
+          name: 'Broken Chain',
+          // Intentionally missing minExecutorBalance, maxExecutorBalance,
+          // and maxPriorityFeePerGas. Other fields are irrelevant for these tests.
+        },
+      },
+    }));
+    vi.resetModules();
+    mockedChainHelpers = await import('../../../src/helpers/chainHelpers.js');
+  });
+
+  afterAll(() => {
+    vi.doUnmock('../../../src/configs/chains.js');
+    vi.resetModules();
+  });
+
+  it('getMinExecutorBalance throws when the field is missing or invalid', () => {
+    expect(() => mockedChainHelpers.getMinExecutorBalance(BROKEN_CHAIN_ID))
+      .toThrow(`No minimum executor balance configured for chain ${BROKEN_CHAIN_ID}`);
+  });
+
+  it('getMaxExecutorBalance throws when the field is missing or invalid', () => {
+    expect(() => mockedChainHelpers.getMaxExecutorBalance(BROKEN_CHAIN_ID))
+      .toThrow(`No maximum executor balance configured for chain ${BROKEN_CHAIN_ID}`);
+  });
+
+  it('getMaxPriorityFeePerGas throws when the field is missing', () => {
+    expect(() => mockedChainHelpers.getMaxPriorityFeePerGas(BROKEN_CHAIN_ID))
+      .toThrow(`No maxPriorityFeePerGas configured for chain ${BROKEN_CHAIN_ID}`);
   });
 });

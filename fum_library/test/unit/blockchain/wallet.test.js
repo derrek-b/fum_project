@@ -317,6 +317,17 @@ describe('Wallet - Unit Tests', () => {
         const fakeProvider = { getNetwork: vi.fn() };
         await expect(getChainId(fakeProvider)).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
+
+      it('should rethrow when provider.getNetwork() rejects', async () => {
+        // Stub provider that passes the instanceof check but whose getNetwork throws.
+        // Exercises the catch-rethrow branch inside getChainId.
+        const mockProvider = {
+          getNetwork: vi.fn().mockRejectedValue(new Error('RPC down')),
+        };
+        Object.setPrototypeOf(mockProvider, ethers.providers.Provider.prototype);
+        await expect(getChainId(mockProvider)).rejects.toThrow('RPC down');
+        expect(mockProvider.getNetwork).toHaveBeenCalledTimes(1);
+      });
     });
   });
 

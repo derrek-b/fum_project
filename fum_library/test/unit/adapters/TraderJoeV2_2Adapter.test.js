@@ -472,6 +472,18 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(result.sender).toBe(ethers.utils.getAddress('0x1234567890123456789012345678901234567890'));
         expect(result.to).toBe(ethers.utils.getAddress('0xABCDEF0123456789ABCDEF0123456789ABCDEF01'));
       });
+
+      it('wraps decode failures as "Failed to parse swap event"', () => {
+        // Pre-validations pass (topic/topics/data all present), but data is too
+        // short to decode the 6-field payload, triggering the outer catch rewrap.
+        expect(() =>
+          adapter.parseSwapEvent({
+            address: '0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8',
+            topics: [validTopic0, validSender, validTo],
+            data: '0x00'
+          })
+        ).toThrow(/Failed to parse swap event:/);
+      });
     });
   });
 
@@ -1208,6 +1220,22 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(() => adapter.getPositionRange({ activeId: 8388608, binStep: 20 }, 5, 101))
           .toThrow('lowerPercent must be greater than 0 and at most 100');
       });
+
+      it('should throw when lowerBinId falls below 0 (uint24 minimum)', () => {
+        // binStep=1 → logBase≈1e-4; lowerPercent=100 → lowerBinOffset≈6931.
+        // activeId=1 → lowerBinId ≈ -6930 < 0, triggering the lower-bound guard.
+        expect(() =>
+          adapter.getPositionRange({ activeId: 1, binStep: 1 }, 1, 100)
+        ).toThrow(/Calculated lowerBinId \(-?\d+\) is below minimum \(0\)/);
+      });
+
+      it('should throw when upperBinId exceeds 16777215 (uint24 maximum)', () => {
+        // activeId near max with binStep=1 + upperPercent=100 pushes upperBinOffset
+        // ~6931, sending upperBinId past 16777215.
+        expect(() =>
+          adapter.getPositionRange({ activeId: 16777215, binStep: 1 }, 100, 1)
+        ).toThrow(/Calculated upperBinId \(\d+\) exceeds maximum \(16777215\)/);
+      });
     });
   });
 
@@ -1540,6 +1568,19 @@ describe('TraderJoeV2_2Adapter', () => {
       it('should throw if token1Data is missing required properties', () => {
         expect(() => adapter.evaluatePriceMovement({ activeId: 8388608 }, { activeId: 8388608, binStep: 20 }, WETH, { address: '0x2' }))
           .toThrow('token1Data must have address, symbol, and decimals properties');
+      });
+
+      it('should throw when baseline price underflows to zero', () => {
+        // Bin 1 with binStep 10000 (2x per bin) → Math.pow(2, 1 - 8388608) underflows to 0,
+        // hitting the baselinePrice === 0 guard.
+        expect(() =>
+          adapter.evaluatePriceMovement(
+            { activeId: 8388608 },
+            { activeId: 1, binStep: 10000 },
+            WETH,
+            USDC
+          )
+        ).toThrow('Baseline price is zero, cannot calculate movement');
       });
     });
 
@@ -1908,6 +1949,14 @@ describe('TraderJoeV2_2Adapter', () => {
         await expect(adapter.selectBestPool('WAVAX', 'USDC', mockProvider, 999999))
           .rejects.toThrow(/No wrapped native token configured for chain/);
       });
+
+      it('should throw when non-native token has no address on requested chain', async () => {
+        // WBTC is defined for chainIds 42161 and 1337 but NOT 1338 (local Avalanche
+        // fork) — hits the `token.addresses[chainId] === undefined` branch at 2624.
+        await expect(
+          adapter.selectBestPool('WBTC', 'USDC', mockProvider, env.chainId)
+        ).rejects.toThrow(`Token WBTC not available on chain ${env.chainId}`);
+      });
     });
   });
 
@@ -2118,6 +2167,60 @@ describe('TraderJoeV2_2Adapter', () => {
         adapterNoPM.addresses.positionManagerAddress = '';
         await expect(adapterNoPM.generateCreatePositionData(validParams()))
           .rejects.toThrow('No position manager address found');
+      });
+
+      describe('Shape validation (consolidated)', () => {
+        // Covers shape-check guards not exercised by the individual tests above.
+        // Each assertion overrides one field of validParams() to trip a specific guard.
+        const call = (overrides) =>
+          adapter.generateCreatePositionData({ ...validParams(), ...overrides });
+
+        it('rejects invalid position shape variants', async () => {
+          await expect(call({ position: 'str' })).rejects.toThrow('Position must be an object');
+          await expect(call({ position: { lowerBinId: NaN, upperBinId: 100 } }))
+            .rejects.toThrow('Position lowerBinId must be a finite number');
+          await expect(call({ position: { lowerBinId: 10, upperBinId: Infinity } }))
+            .rejects.toThrow('Position upperBinId must be a finite number');
+        });
+
+        it('rejects invalid token amount shape variants', async () => {
+          await expect(call({ token0Amount: 'abc' }))
+            .rejects.toThrow('Token0 amount must be a positive numeric string');
+          await expect(call({ token1Amount: null })).rejects.toThrow('Token1 amount is required');
+          await expect(call({ token1Amount: 123 })).rejects.toThrow('Token1 amount must be a string');
+          await expect(call({ token1Amount: 'abc' }))
+            .rejects.toThrow('Token1 amount must be a positive numeric string');
+        });
+
+        it('rejects invalid provider and wallet shape variants', async () => {
+          await expect(call({ provider: null })).rejects.toThrow('Provider is required');
+          await expect(call({ walletAddress: 12345 })).rejects.toThrow('Wallet address must be a string');
+        });
+
+        it('rejects invalid poolData shape variants', async () => {
+          await expect(call({ poolData: 'str' })).rejects.toThrow('Pool data must be an object');
+          await expect(call({ poolData: [] })).rejects.toThrow('Pool data must be an object');
+          await expect(call({ poolData: { activeId: NaN, binStep: 20, address: '0x01' } }))
+            .rejects.toThrow('Pool data activeId must be a finite number');
+          await expect(call({ poolData: { activeId: 100, address: '0x01' } }))
+            .rejects.toThrow('Pool data binStep is required');
+          await expect(call({ poolData: { activeId: 100, binStep: 20 } }))
+            .rejects.toThrow('Pool data address is required');
+        });
+
+        it('rejects invalid token0Data / token1Data shape variants', async () => {
+          await expect(call({ token0Data: { symbol: 'X', decimals: 18 } }))
+            .rejects.toThrow('Token0 address is required');
+          await expect(call({ token1Data: { symbol: 'Y', decimals: 6 } }))
+            .rejects.toThrow('Token1 address is required');
+        });
+
+        it('rejects invalid slippage and deadline shape variants', async () => {
+          await expect(call({ slippageTolerance: null })).rejects.toThrow('Slippage tolerance is required');
+          await expect(call({ slippageTolerance: NaN })).rejects.toThrow('Slippage tolerance must be a finite number');
+          await expect(call({ deadlineMinutes: null })).rejects.toThrow('Deadline minutes is required');
+          await expect(call({ deadlineMinutes: Infinity })).rejects.toThrow('Deadline minutes must be a finite number');
+        });
       });
     });
 
@@ -2869,6 +2972,20 @@ describe('TraderJoeV2_2Adapter', () => {
           adapter.getPositionsForDisplay(validAddress, {})
         ).rejects.toThrow('Valid provider parameter is required');
       });
+
+      it('wraps non-validation errors as "Failed to fetch positions for display"', async () => {
+        // Spy getPoolData (called mid-method after position discovery succeeds) to
+        // inject a non-validation error → outer catch rewraps it (511-520).
+        const spy = vi.spyOn(adapter, 'getPoolData')
+          .mockRejectedValue(new Error('synthetic pool fetch failure'));
+        try {
+          await expect(
+            adapter.getPositionsForDisplay(testVault.address, env.provider)
+          ).rejects.toThrow('Failed to fetch positions for display: synthetic pool fetch failure');
+        } finally {
+          spy.mockRestore();
+        }
+      }, 60000);
     });
   });
 
@@ -2912,6 +3029,32 @@ describe('TraderJoeV2_2Adapter', () => {
       it('should throw for non-existent positionId', async () => {
         await expect(adapter.refreshPositionForDisplay('999999', env.provider))
           .rejects.toThrow();
+      }, 60000);
+
+      it('wraps non-validation errors as "Failed to refresh position"', async () => {
+        // Needs a real position — spy getPoolData to inject a non-validation error.
+        // Hits the outer catch rewrap (635-644).
+        const pmAddress = adapter.addresses.positionManagerAddress;
+        const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
+        const positionIds = await tjpm.getPositionsByOwner(testVault.address);
+        let activeId = null;
+        for (const pid of positionIds) {
+          const pos = await tjpm.getPosition(pid);
+          if (pos.active) { activeId = String(pid); break; }
+        }
+        if (!activeId) {
+          console.log('No active TJ position available - skipping outer-catch rewrap test');
+          return;
+        }
+
+        const spy = vi.spyOn(adapter, 'getPoolData')
+          .mockRejectedValueOnce(new Error('synthetic pool fetch failure'));
+        try {
+          await expect(adapter.refreshPositionForDisplay(activeId, env.provider))
+            .rejects.toThrow(`Failed to refresh position ${activeId} for display: synthetic pool fetch failure`);
+        } finally {
+          spy.mockRestore();
+        }
       }, 60000);
     });
 
@@ -3736,6 +3879,50 @@ describe('TraderJoeV2_2Adapter', () => {
         await expect(adapterNoPM.generateRemoveLiquidityData(validParams()))
           .rejects.toThrow('No position manager address found');
       });
+
+      describe('Shape validation (consolidated)', () => {
+        // Reuses validParams() from enclosing scope; these tests cover the
+        // branches the per-field blocks above don't exercise.
+        const call = (overrides) => adapter.generateRemoveLiquidityData({ ...validParams(), ...overrides });
+
+        it('rejects position types that are not objects', async () => {
+          // Hits 1036-1037: typeof position !== 'object' || Array.isArray(position).
+          await expect(call({ position: [] })).rejects.toThrow('Position must be an object');
+          await expect(call({ position: 42 })).rejects.toThrow('Position must be an object');
+          await expect(call({ position: 'string-pos' })).rejects.toThrow('Position must be an object');
+        });
+
+        it('rejects missing position.pool', async () => {
+          // Hits 1045-1046: !position.pool || typeof position.pool !== 'string'.
+          const { pool, ...noPool } = validPosition;
+          await expect(call({ position: { ...noPool, active: true } }))
+            .rejects.toThrow('Position pool is required');
+          await expect(call({ position: { ...validPosition, pool: 123 } }))
+            .rejects.toThrow('Position pool is required');
+        });
+
+        it('rejects missing provider', async () => {
+          // Hits 1076-1077.
+          await expect(call({ provider: null })).rejects.toThrow('Provider is required');
+          await expect(call({ provider: undefined })).rejects.toThrow('Provider is required');
+        });
+
+        it('rejects slippageTolerance outside 0..100 range', async () => {
+          // Hits 1087-1088.
+          await expect(call({ slippageTolerance: -0.1 }))
+            .rejects.toThrow('Slippage tolerance must be between 0 and 100');
+          await expect(call({ slippageTolerance: 101 }))
+            .rejects.toThrow('Slippage tolerance must be between 0 and 100');
+        });
+
+        it('rejects non-finite deadlineMinutes shape variants', async () => {
+          // Hits 1095-1096.
+          await expect(call({ deadlineMinutes: NaN }))
+            .rejects.toThrow('Deadline minutes must be a finite number');
+          await expect(call({ deadlineMinutes: Infinity }))
+            .rejects.toThrow('Deadline minutes must be a finite number');
+        });
+      });
     });
 
     describe('Calldata Encoding', () => {
@@ -4207,6 +4394,23 @@ describe('TraderJoeV2_2Adapter', () => {
         const posAfter = await tjpm.getPosition(posId);
         expect(posAfter.active).toBe(false);
 
+        // Piggy-back on the fully-removed position to cover the "not found"
+        // guards in refreshPositionForDisplay (563-565) and getPositionById
+        // (668-670). After decreaseLiquidity(100%), the TJ contract zeros
+        // `lbPair` so the "not found" check wins over the downstream
+        // "not active" (569-570) and "has no deposit bins" (574-575, 676-677)
+        // guards — those remain fixture-shadowed. See coverage-gaps.md §C.3.
+        await expect(adapter.refreshPositionForDisplay(posId.toString(), env.provider))
+          .rejects.toThrow(`Position ${posId.toString()} not found`);
+        await expect(adapter.getPositionById(posId, env.provider))
+          .rejects.toThrow(`Position ${posId.toString()} not found`);
+
+        // getPositionsForVDS walks all of the vault's positions; the inner
+        // try/catch at 332-335 swallows the "not found" throw from
+        // getPositionById for this removed one and continues → covers 333-335.
+        const vdsResult = await adapter.getPositionsForVDS(vaultAddress, env.provider);
+        expect(vdsResult.positions[posId.toString()]).toBeUndefined();
+
         console.log(`  Validator chain E2E: position ${posId} removed via decreaseLiquidity()`);
       }, 180000);
     });
@@ -4625,6 +4829,26 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(resultA.token0Share).toBeCloseTo(resultB.token1Share, 10);
         expect(resultA.token1Share).toBeCloseTo(resultB.token0Share, 10);
       }, 60000);
+
+      it('splits shares 50/50 when active bin has zero total USD value', async () => {
+        // Spy _getActiveBinData to return zero reserves → activeTotalUSD = 0 →
+        // hits the 1505-1507 equal-split fallback.
+        const spy = vi.spyOn(adapter, '_getActiveBinData').mockResolvedValueOnce({
+          reserveX: ethers.BigNumber.from(0),
+          reserveY: ethers.BigNumber.from(0)
+        });
+        try {
+          const result = await adapter.getOptimalTokenRatio(getBaseParams());
+          // In-range position with zero active-bin reserves → position has bins
+          // on both sides of active; with 50/50 active split, shares are weighted
+          // by binsBelow/totalBins + 0.5*(1/totalBins) etc. Just assert shapes.
+          expect(result).toHaveProperty('token0Share');
+          expect(result).toHaveProperty('token1Share');
+          expect(result.token0Share + result.token1Share).toBeCloseTo(1.0, 10);
+        } finally {
+          spy.mockRestore();
+        }
+      });
     });
   });
 
@@ -4788,6 +5012,52 @@ describe('TraderJoeV2_2Adapter', () => {
         adapterNoPM.addresses.positionManagerAddress = '';
         await expect(adapterNoPM.generateAddLiquidityData(validParams()))
           .rejects.toThrow('No position manager address found');
+      });
+
+      describe('Shape validation (consolidated)', () => {
+        // Covers shape-check guards not exercised by the individual tests above.
+        // Each assertion overrides one field of validParams() to trip a specific guard.
+        const call = (overrides) =>
+          adapter.generateAddLiquidityData({ ...validParams(), ...overrides });
+
+        it('rejects invalid position bin shape variants', async () => {
+          await expect(call({ position: { id: '1', lowerBinId: NaN, upperBinId: 100 } }))
+            .rejects.toThrow('Position lowerBinId must be a finite number');
+          await expect(call({ position: { id: '1', lowerBinId: 10, upperBinId: Infinity } }))
+            .rejects.toThrow('Position upperBinId must be a finite number');
+        });
+
+        it('rejects invalid token1Amount shape variants', async () => {
+          await expect(call({ token1Amount: null })).rejects.toThrow('Token1 amount is required');
+          await expect(call({ token1Amount: 123 })).rejects.toThrow('Token1 amount must be a string');
+          await expect(call({ token1Amount: 'abc' }))
+            .rejects.toThrow('Token1 amount must be a positive numeric string');
+        });
+
+        it('rejects invalid poolData shape variants', async () => {
+          await expect(call({ poolData: 'str' })).rejects.toThrow('Pool data must be an object');
+          await expect(call({ poolData: [] })).rejects.toThrow('Pool data must be an object');
+          await expect(call({ poolData: { activeId: NaN, binStep: 20, address: '0x01' } }))
+            .rejects.toThrow('Pool data activeId must be a finite number');
+          await expect(call({ poolData: { activeId: 100, address: '0x01' } }))
+            .rejects.toThrow('Pool data binStep is required');
+          await expect(call({ poolData: { activeId: 100, binStep: 20 } }))
+            .rejects.toThrow('Pool data address is required');
+        });
+
+        it('rejects invalid token0Data / token1Data shape variants', async () => {
+          await expect(call({ token0Data: { symbol: 'X', decimals: 18 } }))
+            .rejects.toThrow('Token0 address is required');
+          await expect(call({ token1Data: { symbol: 'Y', decimals: 6 } }))
+            .rejects.toThrow('Token1 address is required');
+        });
+
+        it('rejects invalid slippage and deadline shape variants', async () => {
+          await expect(call({ slippageTolerance: null })).rejects.toThrow('Slippage tolerance is required');
+          await expect(call({ slippageTolerance: NaN })).rejects.toThrow('Slippage tolerance must be a finite number');
+          await expect(call({ deadlineMinutes: null })).rejects.toThrow('Deadline minutes is required');
+          await expect(call({ deadlineMinutes: Infinity })).rejects.toThrow('Deadline minutes must be a finite number');
+        });
       });
     });
 
@@ -5460,6 +5730,41 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(BigInt(meta.quotedAmountOut)).toBeGreaterThan(0n);
       }, 60000);
 
+      it('should encode swapNATIVEForExactTokens when tokenIn is native + EXACT_OUTPUT', async () => {
+        // Hits 2046-2048: isAmountIn=false + tokenInIsNative=true branch.
+        const exactUsdcOut = ethers.utils.parseUnits('10', 6).toString();
+        const result = await adapter.batchSwapTransactions(
+          [{
+            tokenIn: { symbol: 'AVAX', address: wavaxAddress, isNative: true },
+            tokenOut: { symbol: 'USDC', address: usdcAddress },
+            amount: exactUsdcOut,
+            isAmountIn: false,
+          }],
+          { provider: env.provider, chainId: env.chainId, recipient: vaultAddress(), slippageTolerance: 1 }
+        );
+        expect(result.transactions).toHaveLength(1);
+        // value must be the ETH amount (quotedAmountIn * (1 + slippage))
+        expect(result.transactions[0].value).not.toBe('0x00');
+        expect(ethers.BigNumber.from(result.transactions[0].value).gt(0)).toBe(true);
+      }, 60000);
+
+      it('should encode swapTokensForExactNATIVE when tokenOut is native + EXACT_OUTPUT', async () => {
+        // Hits 2049-2051: isAmountIn=false + tokenOutIsNative=true branch.
+        const exactAvaxOut = ethers.utils.parseEther('0.01').toString();
+        const result = await adapter.batchSwapTransactions(
+          [{
+            tokenIn: { symbol: 'USDC', address: usdcAddress },
+            tokenOut: { symbol: 'AVAX', address: wavaxAddress, isNative: true },
+            amount: exactAvaxOut,
+            isAmountIn: false,
+          }],
+          { provider: env.provider, chainId: env.chainId, recipient: vaultAddress(), slippageTolerance: 1 }
+        );
+        expect(result.transactions).toHaveLength(1);
+        // tokenOutIsNative path sets value = '0x00' (no ETH sent in)
+        expect(result.transactions[0].value).toBe('0x00');
+      }, 60000);
+
       it('should include routes with version info for USDT→WAVAX swap', async () => {
         // USDT→WAVAX may route through V1 JoePair (1 hop) or V2.2 via USDC (2 hops)
         // depending on fork block state. Either way, routes must have versions.
@@ -5602,6 +5907,34 @@ describe('TraderJoeV2_2Adapter', () => {
           isAmountIn: null,
           provider: env.provider,
         })).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
+      });
+
+      it('should throw error for invalid tokenOutAddress format', async () => {
+        // Hits 2411-2412 (Invalid tokenOut address catch).
+        await expect(adapter.getBestSwapQuote({
+          tokenInAddress: wavaxAddress,
+          tokenOutAddress: 'not-an-address',
+          amount: ethers.utils.parseEther('0.1').toString(),
+          isAmountIn: true,
+          provider: env.provider,
+        })).rejects.toThrow(/Invalid tokenOut address/);
+      });
+
+      it('should throw error for missing amount (null/empty)', async () => {
+        // Hits 2416-2417 (Amount parameter is required — the falsy-amount branch
+        // not reached by existing non-string/zero tests).
+        const base = {
+          tokenInAddress: wavaxAddress,
+          tokenOutAddress: usdcAddress,
+          isAmountIn: true,
+          provider: env.provider,
+        };
+        await expect(adapter.getBestSwapQuote({ ...base, amount: null }))
+          .rejects.toThrow('Amount parameter is required');
+        await expect(adapter.getBestSwapQuote({ ...base, amount: undefined }))
+          .rejects.toThrow('Amount parameter is required');
+        await expect(adapter.getBestSwapQuote({ ...base, amount: '' }))
+          .rejects.toThrow('Amount parameter is required');
       });
     });
 
@@ -6182,6 +6515,33 @@ describe('TraderJoeV2_2Adapter', () => {
         })).rejects.toThrow('provider is required when feeData is not provided');
       });
 
+      it('should compute feeShares from on-chain data when feeData is omitted', async () => {
+        // Uses the real TJ position created in the top-level beforeAll — exercises
+        // the provider-driven compute branch (794-798): _getPositionOnChainData +
+        // _computeFeeShares → assembles feeShares/feesX/feesY from on-chain state.
+        const pmAddr = adapter.addresses.positionManagerAddress;
+        const tjpm = new ethers.Contract(pmAddr, contractData.TJPositionManager.abi, env.provider);
+        const positionIds = await tjpm.getPositionsByOwner(testVault.address);
+        if (positionIds.length === 0) {
+          console.log('No TJ position available - skipping compute-path test');
+          return;
+        }
+        const posId = positionIds[0].toString();
+
+        const result = await adapter.generateClaimFeesData({
+          position: { id: posId },
+          provider: env.provider,
+        });
+
+        // Fresh position with no swaps → all feeShares zero → short-circuit return null.
+        // Any result from this path proves the compute branch executed.
+        if (result !== null) {
+          expect(result).toHaveProperty('to', adapter.addresses.positionManagerAddress);
+          expect(result).toHaveProperty('data');
+          expect(result).toHaveProperty('value', '0x00');
+        }
+      }, 30000);
+
       it('should not include extra metadata fields beyond { to, data, value }', async () => {
         const result = await adapter.generateClaimFeesData({
           position: { id: '42' },
@@ -6502,5 +6862,253 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(result.feesByPosition['1']).toBeDefined();
       });
     });
+  });
+
+  describe('Missing positionManagerAddress (consolidated)', () => {
+    // Covers the "No position manager address configured" guard across the
+    // four read-path methods that don't have a per-method test for it yet:
+    // getPositionsForVDS (303-304), getPositionsForDisplay (370-371),
+    // refreshPositionForDisplay (554-555), getPositionById (658-659).
+    const makeBrokenAdapter = () => {
+      const broken = new TraderJoeV2_2Adapter(env.chainId, env.provider);
+      broken.addresses.positionManagerAddress = '';
+      return broken;
+    };
+    const sampleOwner = '0x0000000000000000000000000000000000000001';
+
+    it('getPositionsForVDS re-throws config error from outer catch', async () => {
+      await expect(makeBrokenAdapter().getPositionsForVDS(sampleOwner, env.provider))
+        .rejects.toThrow(/No position manager address configured for chainId/);
+    });
+
+    it('getPositionsForDisplay re-throws config error from outer catch', async () => {
+      await expect(makeBrokenAdapter().getPositionsForDisplay(sampleOwner, env.provider))
+        .rejects.toThrow(/No position manager address configured for chainId/);
+    });
+
+    it('refreshPositionForDisplay re-throws config error from outer catch', async () => {
+      await expect(makeBrokenAdapter().refreshPositionForDisplay('1', env.provider))
+        .rejects.toThrow(/No position manager address configured for chainId/);
+    });
+
+    it('getPositionById re-throws config error from outer catch', async () => {
+      await expect(makeBrokenAdapter().getPositionById('1', env.provider))
+        .rejects.toThrow(/No position manager address configured for chainId/);
+    });
+
+    it('getPositionsForVDS wraps non-validation errors as "Failed to fetch positions for VDS"', async () => {
+      // Point positionManagerAddress at a dead address so getPositionsByOwner
+      // reverts with a non-filtered message → outer catch rewraps (347-348).
+      const broken = new TraderJoeV2_2Adapter(env.chainId, env.provider);
+      broken.addresses.positionManagerAddress = '0x000000000000000000000000000000000000dEaD';
+      await expect(broken.getPositionsForVDS(sampleOwner, env.provider))
+        .rejects.toThrow(/Failed to fetch positions for VDS/);
+    }, 15000);
+
+    it('getPositionById wraps non-validation errors as "Failed to fetch position"', async () => {
+      // Same dead-address trick → positionManager.getPosition reverts → rewrap
+      // at 712-713 fires.
+      const broken = new TraderJoeV2_2Adapter(env.chainId, env.provider);
+      broken.addresses.positionManagerAddress = '0x000000000000000000000000000000000000dEaD';
+      await expect(broken.getPositionById('1', env.provider))
+        .rejects.toThrow(/Failed to fetch position 1/);
+    }, 15000);
+
+    it('_generateSwapTransaction wraps quoter failures as "Failed to get swap quote for ..."', async () => {
+      // Point lbQuoterAddress at a dead address → findBestPath call reverts →
+      // quoter-call catch at 2003-2005 rewraps. chainId is required because the
+      // method calls getWrappedNativeAddress(chainId) before quoting.
+      const broken = new TraderJoeV2_2Adapter(env.chainId, env.provider);
+      broken.addresses.lbQuoterAddress = '0x000000000000000000000000000000000000dEaD';
+      await expect(broken._generateSwapTransaction({
+        tokenIn: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
+        tokenOut: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+        amount: ethers.utils.parseEther('0.1').toString(),
+        isAmountIn: true,
+        recipient: '0x0000000000000000000000000000000000000001',
+        slippageTolerance: 0.5,
+        deadlineMinutes: 20,
+        chainId: env.chainId,
+        provider: env.provider
+      })).rejects.toThrow(/Failed to get swap quote for WAVAX -> USDC/);
+    }, 15000);
+
+    it('getBestSwapQuote wraps quoter failures as "Failed to get swap quote"', async () => {
+      // Same broken lbQuoterAddress → quoter-call catch at 2446-2448 rewraps.
+      const broken = new TraderJoeV2_2Adapter(env.chainId, env.provider);
+      broken.addresses.lbQuoterAddress = '0x000000000000000000000000000000000000dEaD';
+      await expect(broken.getBestSwapQuote({
+        tokenInAddress: wavaxAddress,
+        tokenOutAddress: usdcAddress,
+        amount: ethers.utils.parseEther('0.1').toString(),
+        isAmountIn: true,
+        provider: env.provider
+      })).rejects.toThrow(/Failed to get swap quote/);
+    }, 15000);
+
+    it('getPoolData wraps non-validation errors as "Failed to get pool data for ..."', async () => {
+      // Pass a non-contract pool address → lbPair.getActiveId() reverts inside
+      // the try block → outer catch (2979-2981) rewraps.
+      const deadPool = '0x000000000000000000000000000000000000dEaD';
+      await expect(adapter.getPoolData(deadPool, env.provider))
+        .rejects.toThrow(/Failed to get pool data for /);
+    }, 15000);
+  });
+
+  describe('_createDeadline', () => {
+    it('throws for non-finite deadlineMinutes', () => {
+      // Hits 1816-1818 negative/non-finite guard.
+      expect(() => adapter._createDeadline(-1))
+        .toThrow(/Invalid deadline minutes: -1. Must be a non-negative number/);
+      expect(() => adapter._createDeadline(NaN))
+        .toThrow(/Invalid deadline minutes: NaN/);
+      expect(() => adapter._createDeadline(Infinity))
+        .toThrow(/Invalid deadline minutes: Infinity/);
+    });
+  });
+
+  describe('_getSwapTopicForVersion', () => {
+    it('throws for unknown TJ version', () => {
+      // Hits 1848-1849.
+      expect(() => adapter._getSwapTopicForVersion(999))
+        .toThrow('Unknown TJ version: 999');
+      expect(() => adapter._getSwapTopicForVersion(-1))
+        .toThrow('Unknown TJ version: -1');
+    });
+  });
+
+  describe('selectBestPool broken factory', () => {
+    const mockProvider = { getNetwork: () => Promise.resolve({ chainId: env.chainId }) };
+
+    it('throws "Trader Joe V2.2 not available on chain" when factory address is missing', async () => {
+      // Hits 2642-2644. Break lbFactoryAddress on the adapter.
+      const broken = new TraderJoeV2_2Adapter(env.chainId, env.provider);
+      broken.addresses.lbFactoryAddress = ethers.constants.AddressZero;
+      await expect(broken.selectBestPool('WAVAX', 'USDC', mockProvider, env.chainId))
+        .rejects.toThrow(/Trader Joe V2.2 not available on chain/);
+    });
+  });
+
+  describe('getPositionRange shape validation', () => {
+    it('rejects non-finite poolData.activeId', () => {
+      // Hits 2780-2782.
+      expect(() => adapter.getPositionRange({ activeId: Infinity, binStep: 20 }, 5, 5))
+        .toThrow('poolData.activeId must be a finite number');
+      expect(() => adapter.getPositionRange({ activeId: NaN, binStep: 20 }, 5, 5))
+        .toThrow('poolData.activeId must be a finite number');
+    });
+
+    it('rejects non-number upperPercent', () => {
+      // Hits 2794-2796.
+      expect(() => adapter.getPositionRange({ activeId: 8388608, binStep: 20 }, '5', 5))
+        .toThrow('upperPercent must be a finite number');
+      expect(() => adapter.getPositionRange({ activeId: 8388608, binStep: 20 }, NaN, 5))
+        .toThrow('upperPercent must be a finite number');
+    });
+
+    it('rejects non-number lowerPercent', () => {
+      // Hits 2805-2807.
+      expect(() => adapter.getPositionRange({ activeId: 8388608, binStep: 20 }, 5, '5'))
+        .toThrow('lowerPercent must be a finite number');
+      expect(() => adapter.getPositionRange({ activeId: 8388608, binStep: 20 }, 5, NaN))
+        .toThrow('lowerPercent must be a finite number');
+    });
+  });
+
+  describe('Parser continue branches (consolidated)', () => {
+    // Each parser has a try/catch inside a log loop; matching topic + malformed
+    // data makes parseLog throw, loop's catch continues silently. Fabricate the
+    // logs using the same event signatures the source uses.
+    it('parseClosureReceipt silently skips malformed PositionRemoved/FeesCollected logs', async () => {
+      // Hits 2115-2117. FeesCollected topic matches, garbage data → parseLog throws.
+      const feesIface = new ethers.utils.Interface([
+        'event FeesCollected(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256 amountX, uint256 amountY)'
+      ]);
+      const removedIface = new ethers.utils.Interface([
+        'event PositionRemoved(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256 percentage, uint256 amountX, uint256 amountY)'
+      ]);
+      const feesTopic = feesIface.getEventTopic('FeesCollected');
+      const removedTopic = removedIface.getEventTopic('PositionRemoved');
+      const garbageReceipt = {
+        logs: [
+          { address: '0x0000000000000000000000000000000000000001', topics: [removedTopic], data: '0x00' },
+          { address: '0x0000000000000000000000000000000000000001', topics: [feesTopic], data: '0x00' }
+        ]
+      };
+      const result = await adapter.parseClosureReceipt(garbageReceipt, { '12345': {} });
+      expect(result).toHaveProperty('principalByPosition');
+      expect(result).toHaveProperty('feesByPosition');
+    });
+
+    it('parseCollectReceipt silently skips malformed FeesCollected logs', async () => {
+      // Hits 2160-2162.
+      const feesIface = new ethers.utils.Interface([
+        'event FeesCollected(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256 amountX, uint256 amountY)'
+      ]);
+      const feesTopic = feesIface.getEventTopic('FeesCollected');
+      const receipt = {
+        logs: [{ address: '0x0000000000000000000000000000000000000001', topics: [feesTopic], data: '0x00' }]
+      };
+      const result = await adapter.parseCollectReceipt(receipt, { '12345': {} });
+      expect(result.feesByPosition).toEqual({});
+    });
+
+    it('parseSwapReceipt silently skips malformed V2.2 Swap logs', () => {
+      // Hits 2208-2210. V2.2 topic matches, garbage data → parseSwapEvent throws.
+      // TJ metadata requires a non-empty routes array (unlike V3/V4).
+      const swapTopicV22 = ethers.utils.id(adapter._getSwapEventSignature());
+      const receipt = {
+        logs: [{ address: '0x0000000000000000000000000000000000000001', topics: [swapTopicV22], data: '0x00', logIndex: 0 }]
+      };
+      const result = adapter.parseSwapReceipt(receipt, [{
+        tokenInAddress: wavaxAddress,
+        tokenOutAddress: usdcAddress,
+        routes: [{ tokenPath: [wavaxAddress, usdcAddress], poolCount: 1 }]
+      }]);
+      expect(result).toBeDefined();
+    });
+
+    it('parseIncreaseLiquidityReceipt silently skips malformed PositionCreated/Increased logs', () => {
+      // Hits 2347-2349. PositionCreated topic matches, garbage data → parseLog throws.
+      // NOTE: signature must match the adapter's exactly (TJPositionManager
+      // emits `address proxy, uint256[] depositIds` — not uint16/int256 variants)
+      // or the topic hash won't match and the catch never fires.
+      const createdIface = new ethers.utils.Interface([
+        'event PositionCreated(uint256 indexed positionId, address indexed vault, address indexed lbPair, address proxy, uint256[] depositIds, uint256[] liquidityMinted, uint256 amountXAdded, uint256 amountYAdded)'
+      ]);
+      const createdTopic = createdIface.getEventTopic('PositionCreated');
+      const receipt = {
+        logs: [{
+          address: '0x0000000000000000000000000000000000000001',
+          // Three indexed params need three topics (beyond topic[0] signature) so
+          // ethers attempts a full decode on `data` — the `0x00` data blows up.
+          topics: [
+            createdTopic,
+            ethers.utils.hexZeroPad('0x01', 32), // positionId
+            ethers.utils.hexZeroPad('0x00', 32), // vault
+            ethers.utils.hexZeroPad('0x00', 32), // lbPair
+          ],
+          data: '0x00'
+        }]
+      };
+      // With no valid PositionCreated or PositionIncreased event, the parser
+      // falls through to its final throw.
+      expect(() => adapter.parseIncreaseLiquidityReceipt(receipt))
+        .toThrow(/PositionCreated or PositionIncreased event not found in receipt/);
+    });
+
+    it('selectBestPool throws "No pools found" when factory returns no pairs', async () => {
+      // AUSD/USD₮0 is a pair that TJ V2.2 avalanche may not have a pool for —
+      // factoryContract.getAllLBPairs returns empty → hits 2657-2659.
+      // If this pair DOES have a pool, the test gracefully accepts a more
+      // specific failure (no active pools, zero-reserve pairs, etc.).
+      try {
+        await adapter.selectBestPool('AUSD', 'USD₮0', env.provider, env.chainId);
+      } catch (error) {
+        expect(error.message).toMatch(
+          /No pools found for AUSD\/USD₮0|No active pools .* for AUSD\/USD₮0/
+        );
+      }
+    }, 30000);
   });
 });

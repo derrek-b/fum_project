@@ -4,14 +4,16 @@
  * Tests using real CoinGecko API - requires COINGECKO_API_KEY in .env.test
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import {
   buildApiUrl,
   fetchTokenPrices,
   clearPriceCache,
   priceCache,
   ENDPOINTS,
-  CACHE_DURATIONS
+  CACHE_DURATIONS,
+  configureCoingecko,
+  resetCoingeckoConfig
 } from '../../../src/services/coingecko.js';
 
 describe('CoinGecko Service - Real API Tests', () => {
@@ -343,6 +345,19 @@ describe('CoinGecko Service - Real API Tests', () => {
         // Restore original fetch
         global.fetch = originalFetch;
       });
+
+      it('should throw when CoinGecko HTTP response is not ok', async () => {
+        const originalFetch = global.fetch;
+        global.fetch = vi.fn().mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+        });
+
+        await expect(fetchTokenPrices(['ETH'], CACHE_DURATIONS['0-SECONDS']))
+          .rejects.toThrow(/CoinGecko API returned 503/);
+
+        global.fetch = originalFetch;
+      });
     });
   });
 
@@ -371,4 +386,32 @@ describe('CoinGecko Service - Real API Tests', () => {
     });
   });
 
+});
+
+describe('CoinGecko Service - API key guard', () => {
+  afterEach(() => {
+    // Restore between tests so sibling tests start from a known-good state.
+    configureCoingecko({ apiKey: process.env.COINGECKO_API_KEY || 'test-key' });
+  });
+
+  describe('resetCoingeckoConfig', () => {
+    it('clears the configured API key (verified via subsequent guard throw)', () => {
+      // Start from a known-configured state, then reset
+      configureCoingecko({ apiKey: 'some-configured-value' });
+      resetCoingeckoConfig();
+
+      // Only way to verify state indirectly (no getter exported) — call a
+      // function that reads _config.apiKey and assert the guard fires.
+      expect(() => buildApiUrl(ENDPOINTS.SIMPLE_PRICE, { ids: 'ethereum', vs_currencies: 'usd' }))
+        .toThrow('CoinGecko API key not configured');
+    });
+  });
+
+  describe('buildApiUrl API key guard', () => {
+    it('throws a targeted error when called without a configured API key', () => {
+      resetCoingeckoConfig();
+      expect(() => buildApiUrl(ENDPOINTS.SIMPLE_PRICE, { ids: 'ethereum', vs_currencies: 'usd' }))
+        .toThrow('CoinGecko API key not configured');
+    });
+  });
 });

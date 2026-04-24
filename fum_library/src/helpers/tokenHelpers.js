@@ -821,12 +821,9 @@ export function getCoingeckoId(symbol) {
   validateTokenSymbol(symbol);
 
   // Wrapped native tokens (WETH, WAVAX, etc.) use the same price as their native counterpart
-  if (isWrappedNativeToken(symbol)) {
-    // Find the native token that has this wrapped symbol
-    for (const token of Object.values(tokens)) {
-      if (token.isNative && token.wrappedSymbol === symbol) {
-        return token.coingeckoId;
-      }
+  for (const token of Object.values(tokens)) {
+    if (token.isNative && token.wrappedSymbol === symbol) {
+      return token.coingeckoId;
     }
   }
 

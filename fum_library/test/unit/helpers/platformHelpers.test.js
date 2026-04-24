@@ -4,7 +4,7 @@
  * Tests for platform configuration utilities and validation functions
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import {
   validatePlatformId,
   getPlatformMetadata,
@@ -1069,4 +1069,64 @@ describe('Platform Helpers', () => {
     });
   });
 
+});
+
+// Config-injection tests: guards inside platformHelpers that fire only when a
+// platform's config is malformed (missing feeTiers, empty feeTiers object, or
+// a chain references a platformId that isn't in the platforms config). We
+// inject a synthetic platforms config. platformHelpers is pre-loaded via
+// init → theGraph → platformHelpers, so doMock + resetModules is required.
+describe('platformHelpers — config-injection tests', () => {
+  let mockedPlatformHelpers;
+
+  beforeAll(async () => {
+    vi.doMock('../../../src/configs/platforms.js', () => ({
+      default: {
+        // Exists but feeTiers is an empty object — trips
+        // `if (feeArray.length === 0)` in getPlatformFeeTiers.
+        emptyFees: {
+          name: 'Empty Fees Platform',
+          logo: 'x.svg',
+          color: '#000',
+          feeTiers: {},
+        },
+        // Exists but has no feeTiers property — trips the early
+        // `!platform.feeTiers` guard in getPlatformTickSpacing.
+        noFees: {
+          name: 'No Fees Platform',
+          logo: 'x.svg',
+          color: '#000',
+        },
+        // Intentionally does NOT include uniswapV3/uniswapV4 etc.
+        // Real chains.js still configures those platforms on chain 42161,
+        // so getAvailablePlatforms(42161) iterates real platformIds and hits
+        // the "metadata not found" guard because they're absent from this mock.
+      },
+    }));
+    vi.resetModules();
+    mockedPlatformHelpers = await import('../../../src/helpers/platformHelpers.js');
+  });
+
+  afterAll(() => {
+    vi.doUnmock('../../../src/configs/platforms.js');
+    vi.resetModules();
+  });
+
+  it('getPlatformFeeTiers throws when feeTiers is an empty object', () => {
+    expect(() => mockedPlatformHelpers.getPlatformFeeTiers('emptyFees'))
+      .toThrow('Platform emptyFees feeTiers not configured');
+  });
+
+  it('getPlatformTickSpacing throws when the platform has no feeTiers property', () => {
+    expect(() => mockedPlatformHelpers.getPlatformTickSpacing('noFees', 500))
+      .toThrow('Platform noFees feeTiers not configured');
+  });
+
+  it('getAvailablePlatforms throws when a chain references a platform absent from the platforms config', () => {
+    // Real chains.js still has uniswapV3/uniswapV4 etc. configured on 42161,
+    // but our mocked platforms config omits them. The loop trips on the first
+    // one it encounters.
+    expect(() => mockedPlatformHelpers.getAvailablePlatforms(42161))
+      .toThrow(/metadata not found/);
+  });
 });

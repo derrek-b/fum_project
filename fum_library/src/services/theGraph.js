@@ -28,6 +28,15 @@ export function configureTheGraph({ apiKey } = {}) {
 }
 
 /**
+ * Reset configuration to defaults (for testing purposes)
+ */
+export function resetTheGraphConfig() {
+  _config = {
+    apiKey: null,
+  };
+}
+
+/**
  * Execute GraphQL query against subgraph
  * @private
  * @param {string} subgraphId - Subgraph ID

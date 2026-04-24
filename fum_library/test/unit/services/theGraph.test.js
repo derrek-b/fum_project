@@ -2,10 +2,17 @@
  * The Graph Service Unit Tests
  *
  * Tests using real The Graph API - requires THEGRAPH_API_KEY in .env.test
+ *
+ * The Messari-queryType tests at the bottom are the exception: they use
+ * vi.doMock + vi.resetModules + dynamic import to inject a synthetic platform
+ * with queryType: 'messari' because no live platform config uses Messari.
+ * Static vi.mock doesn't work here because test/setup.js → initFumLibrary
+ * already loaded theGraph.js (and its platformHelpers import) before any test
+ * file runs, so the module graph must be reset and re-imported.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
-import { getPoolTVLAverage, getPoolAge, discoverV4Pools, getV4PositionsByOwner, configureTheGraph } from '../../../src/services/theGraph.js';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
+import { getPoolTVLAverage, getPoolAge, discoverV4Pools, getV4PositionsByOwner, configureTheGraph, resetTheGraphConfig } from '../../../src/services/theGraph.js';
 
 describe('The Graph Service - Real API Tests', () => {
   // Configure API key at the start
@@ -933,4 +940,135 @@ describe('The Graph Service - Real API Tests', () => {
     });
   });
 
+});
+
+describe('The Graph Service - Messari queryType (mocked platform)', () => {
+  const MESSARI_PLATFORM = 'messariTest';
+  const MESSARI_CHAIN_ID = 42161;
+  const MESSARI_POOL = '0xabcdef0123456789abcdef0123456789abcdef01';
+
+  // Dynamically-imported references bound to a theGraph module whose
+  // platformHelpers import is replaced by the pass-through mock below.
+  let messariTheGraph;
+  let originalFetch;
+
+  beforeAll(async () => {
+    // Pass-through mock: only intercepts 'messariTest'; real platforms pass through.
+    vi.doMock('../../../src/helpers/platformHelpers.js', async (importOriginal) => {
+      const actual = await importOriginal();
+      return {
+        ...actual,
+        getPlatformMetadata: (platformId) => {
+          if (platformId === 'messariTest') {
+            return {
+              subgraphs: {
+                42161: { id: 'fake-messari-subgraph-id', queryType: 'messari' }
+              }
+            };
+          }
+          return actual.getPlatformMetadata(platformId);
+        }
+      };
+    });
+
+    // Reset the module cache so theGraph.js re-evaluates with the mocked
+    // platformHelpers — it was already cached via test/setup.js → initFumLibrary.
+    vi.resetModules();
+    messariTheGraph = await import('../../../src/services/theGraph.js');
+
+    // theGraph's internal _config is module-level and was cleared by
+    // resetModules, so re-configure the API key for this isolated module.
+    messariTheGraph.configureTheGraph({ apiKey: 'test-key' });
+  });
+
+  afterAll(() => {
+    vi.doUnmock('../../../src/helpers/platformHelpers.js');
+    vi.resetModules();
+  });
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  describe('getPoolTVLAverage', () => {
+    it('uses liquidityPoolDailySnapshots and averages totalValueLockedUSD', async () => {
+      const days = 3;
+      const snapshots = [
+        { timestamp: '1700000000', totalValueLockedUSD: '100' },
+        { timestamp: '1699900000', totalValueLockedUSD: '200' },
+        { timestamp: '1699800000', totalValueLockedUSD: '300' },
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: { liquidityPoolDailySnapshots: snapshots } }),
+      });
+
+      const result = await messariTheGraph.getPoolTVLAverage(
+        MESSARI_POOL, MESSARI_CHAIN_ID, MESSARI_PLATFORM, days
+      );
+
+      expect(result).toBe(200); // (100 + 200 + 300) / 3
+    });
+  });
+
+  describe('getPoolAge', () => {
+    it('uses liquidityPool.createdTimestamp and returns it as an integer', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: { liquidityPool: { createdTimestamp: '1700000000' } } }),
+      });
+
+      const result = await messariTheGraph.getPoolAge(
+        MESSARI_POOL, MESSARI_CHAIN_ID, MESSARI_PLATFORM
+      );
+
+      expect(result).toBe(1700000000);
+    });
+
+    it('throws "Pool not found" when liquidityPool is null', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: { liquidityPool: null } }),
+      });
+
+      await expect(messariTheGraph.getPoolAge(
+        MESSARI_POOL, MESSARI_CHAIN_ID, MESSARI_PLATFORM
+      )).rejects.toThrow(`Pool ${MESSARI_POOL} not found`);
+    });
+  });
+});
+
+describe('The Graph Service - API key guard', () => {
+  afterEach(() => {
+    // Restore between tests so sibling tests start from a known-good state.
+    configureTheGraph({ apiKey: process.env.THE_GRAPH_API_KEY || 'test-key' });
+  });
+
+  describe('resetTheGraphConfig', () => {
+    it('clears the configured API key (verified via subsequent guard throw)', async () => {
+      // Start from a known-configured state, then reset
+      configureTheGraph({ apiKey: 'some-configured-value' });
+      resetTheGraphConfig();
+
+      // Only way to verify state indirectly (no getter exported) — call a
+      // function that reads _config.apiKey and assert the guard fires.
+      await expect(
+        getPoolTVLAverage('0xc31e54c7a869b9fcbecc14363cf510d1c41fa443', 42161, 'uniswapV3', 7)
+      ).rejects.toThrow('The Graph API key not configured');
+    });
+  });
+
+  describe('executeQuery API key guard', () => {
+    it('throws a targeted error when called without a configured API key', async () => {
+      resetTheGraphConfig();
+      await expect(
+        getPoolTVLAverage('0xc31e54c7a869b9fcbecc14363cf510d1c41fa443', 42161, 'uniswapV3', 7)
+      ).rejects.toThrow('The Graph API key not configured');
+    });
+  });
 });

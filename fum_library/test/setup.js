@@ -18,8 +18,10 @@ dotenv.config({ path: path.join(__dirname, '.env.test') });
 
 // Initialize fum_library with test API keys
 initFumLibrary({
-  coingeckoApiKey: process.env.COINGECKO_API_KEY,
+  coingeckoApiKey: process.env.COINGECKO_API_KEY || 'test-key',
   alchemyApiKey: process.env.ALCHEMY_API_KEY,
+  blockExplorerApiKey: process.env.BLOCK_EXPLORER_API_KEY || 'test-key',
+  theGraphApiKey: process.env.THE_GRAPH_API_KEY || 'test-key',
 });
 
 // Suppress console output during tests (optional)

@@ -12,7 +12,7 @@ import { ethers } from 'ethers';
 import { setupCoreEnvironment, connectToSharedHardhat } from '../test-env.js';
 import chains from '../../src/configs/chains.js';
 import tokens from '../../src/configs/tokens.js';
-import { UniswapV3Adapter } from '../../src/adapters/index.js';
+import UniswapV3Adapter from '../../src/adapters/UniswapV3Adapter.js';
 import contractData from '../../src/artifacts/contracts.js';
 import ERC20_ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
 

@@ -241,6 +241,54 @@ describe('Merkl Service', () => {
         await expect(fetchPoolIncentives(ARBITRUM_CHAIN_ID, KNOWN_INCENTIVIZED_POOL))
           .rejects.toThrow('Failed to fetch Merkl pool incentives');
       });
+
+      it('should return inactive result when opportunities response is not an array', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ error: 'malformed' }),
+        });
+
+        const result = await fetchPoolIncentives(ARBITRUM_CHAIN_ID, KNOWN_INCENTIVIZED_POOL);
+
+        expect(result).toEqual({ active: false, programs: [] });
+      });
+    });
+
+    describe('Active Campaign Mapping', () => {
+      let originalFetch;
+
+      beforeEach(() => {
+        originalFetch = global.fetch;
+      });
+
+      afterEach(() => {
+        global.fetch = originalFetch;
+      });
+
+      it('should map active campaigns into programs', async () => {
+        const futureTimestamp = Math.floor(Date.now() / 1000) + 86400; // 1 day from now
+
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => [{
+            identifier: KNOWN_INCENTIVIZED_POOL.toLowerCase(),
+            campaigns: [{
+              rewardToken: { address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', symbol: 'UNI' },
+              endTimestamp: futureTimestamp,
+            }],
+          }],
+        });
+
+        const result = await fetchPoolIncentives(ARBITRUM_CHAIN_ID, KNOWN_INCENTIVIZED_POOL);
+
+        expect(result.active).toBe(true);
+        expect(result.programs).toHaveLength(1);
+        expect(result.programs[0]).toEqual({
+          rewardToken: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984',
+          rewardTokenSymbol: 'UNI',
+          endTimestamp: futureTimestamp,
+        });
+      });
     });
   });
 
@@ -427,6 +475,17 @@ describe('Merkl Service', () => {
 
         await expect(fetchClaimData(ARBITRUM_CHAIN_ID, '0xuser'))
           .rejects.toThrow('Failed to fetch Merkl claim data');
+      });
+
+      it('should return null when claim response is not an array', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ error: 'malformed' }),
+        });
+
+        const result = await fetchClaimData(ARBITRUM_CHAIN_ID, '0xuser');
+
+        expect(result).toBeNull();
       });
     });
   });

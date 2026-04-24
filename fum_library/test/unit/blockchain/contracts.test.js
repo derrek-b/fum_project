@@ -4,7 +4,7 @@
  * Tests using Hardhat fork of Arbitrum - no mocks, real blockchain interactions.
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { ethers } from 'ethers';
 import { setupV3SharedEnvironment } from '../../setup/v3-setup.js';
 import UniswapV3Adapter from '../../../src/adapters/UniswapV3Adapter.js';
@@ -260,6 +260,18 @@ describe('contracts.js - Unit Tests', () => {
           await getContract('VaultFactory', mockProvider);
         }).rejects.toThrow('No VaultFactory deployment found for network 999999');
       });
+
+      it('should throw when provider.getNetwork() returns a network without chainId', async () => {
+        // Provider passes the instanceof check but its network object lacks chainId,
+        // tripping the `!network.chainId` guard.
+        const mockProvider = {
+          getNetwork: async () => ({ name: 'weird' }), // no chainId
+        };
+        Object.setPrototypeOf(mockProvider, ethers.providers.Provider.prototype);
+
+        await expect(getContract('VaultFactory', mockProvider))
+          .rejects.toThrow('Provider network not available');
+      });
     });
   });
 
@@ -508,6 +520,31 @@ describe('contracts.js - Unit Tests', () => {
           createVault(vaultName, env.provider)
         ).rejects.toThrow('Invalid signer. Must be an ethers signer instance.');
       });
+
+      it('throws "Failed to find VaultCreated event" when receipt has no matching log and re-throws through outer catch', async () => {
+        // Spy on the signer's sendTransaction so the call short-circuits and
+        // returns a receipt with empty logs — no VaultCreated event present.
+        // This exercises:
+        //   (a) the `if (!vaultCreatedEvent)` throw inside the try block
+        //   (b) the outer catch's fall-through re-throw (since the thrown
+        //       error has no .code property, none of the specific-code
+        //       branches match, control reaches `throw error`)
+        const signer = env.signers[0];
+        const spy = vi.spyOn(signer, 'sendTransaction').mockResolvedValueOnce({
+          hash: '0x' + '1'.repeat(64),
+          wait: async () => ({
+            transactionHash: '0x' + '1'.repeat(64),
+            logs: [],
+            status: 1,
+          }),
+        });
+        try {
+          await expect(createVault('event-missing-test', signer))
+            .rejects.toThrow('Failed to find VaultCreated event in transaction receipt');
+        } finally {
+          spy.mockRestore();
+        }
+      });
     });
   });
 
@@ -660,6 +697,65 @@ describe('contracts.js - Unit Tests', () => {
         }).toThrow('Invalid provider. Must be an ethers provider instance.');
       });
     });
+
+    describe('ABI validation (mocked artifacts)', () => {
+      let mockedModule;
+
+      beforeAll(async () => {
+        // Inject a contracts artifact where PositionVault.abi is missing/empty,
+        // tripping the "PositionVault ABI not found or invalid" guard.
+        vi.doMock('../../../src/artifacts/contracts.js', () => ({
+          default: {
+            VaultFactory: { abi: [{}], addresses: {} },
+            PositionVault: { abi: [] }, // empty array → hits the length-0 check
+          },
+        }));
+        vi.resetModules();
+        mockedModule = await import('../../../src/blockchain/contracts.js');
+      });
+
+      afterAll(() => {
+        vi.doUnmock('../../../src/artifacts/contracts.js');
+        vi.resetModules();
+      });
+
+      it('throws when PositionVault ABI is missing or empty', () => {
+        expect(() =>
+          mockedModule.getVaultContract(env.testVault.address, env.provider)
+        ).toThrow('PositionVault ABI not found or invalid');
+      });
+    });
+
+    describe('Contract construction failure (mocked artifacts)', () => {
+      let mockedModule;
+
+      beforeAll(async () => {
+        // Inject a PositionVault ABI that passes the length-array-object
+        // guard (length > 0, isArray) but is structurally invalid — the
+        // Interface constructor inside `new ethers.Contract()` will throw
+        // on `{ type: null }` ("invalid fragment object"), exercising the
+        // `try { new ethers.Contract(...) } catch` fall-through.
+        vi.doMock('../../../src/artifacts/contracts.js', () => ({
+          default: {
+            VaultFactory: { abi: [{}], addresses: {} },
+            PositionVault: { abi: [{ type: null }] },
+          },
+        }));
+        vi.resetModules();
+        mockedModule = await import('../../../src/blockchain/contracts.js');
+      });
+
+      afterAll(() => {
+        vi.doUnmock('../../../src/artifacts/contracts.js');
+        vi.resetModules();
+      });
+
+      it('wraps errors from new ethers.Contract() in "Failed to create contract instance"', () => {
+        expect(() =>
+          mockedModule.getVaultContract(env.testVault.address, env.provider)
+        ).toThrow(/Failed to create contract instance/);
+      });
+    });
   });
 
   describe('getUserVaults', () => {
@@ -795,6 +891,22 @@ describe('contracts.js - Unit Tests', () => {
           getUserVaults(env.signers[0].address, env.signers[0])
         ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
+
+      it('should wrap errors when the factory call rejects', async () => {
+        // Stub provider that passes the instanceof + getNetwork checks so we
+        // reach the factory call, then fails at provider.call time. Trips the
+        // catch-and-wrap in getUserVaults.
+        const stubProvider = {
+          _isProvider: true, // ethers v5 duck-types providers via this flag
+          getNetwork: async () => ({ chainId: 1337, name: 'arbitrum' }),
+          call: async () => { throw new Error('stub RPC call failed'); },
+          resolveName: async () => null,
+        };
+        Object.setPrototypeOf(stubProvider, ethers.providers.Provider.prototype);
+
+        await expect(getUserVaults(env.signers[0].address, stubProvider))
+          .rejects.toThrow(/Failed to get user vaults/);
+      });
     });
   });
 
@@ -869,6 +981,19 @@ describe('contracts.js - Unit Tests', () => {
         await expect(
           getActiveVaults({})
         ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
+      });
+
+      it('should wrap errors when the factory call rejects', async () => {
+        const stubProvider = {
+          _isProvider: true, // ethers v5 duck-types providers via this flag
+          getNetwork: async () => ({ chainId: 1337, name: 'arbitrum' }),
+          call: async () => { throw new Error('stub RPC call failed'); },
+          resolveName: async () => null,
+        };
+        Object.setPrototypeOf(stubProvider, ethers.providers.Provider.prototype);
+
+        await expect(getActiveVaults(stubProvider))
+          .rejects.toThrow(/Failed to get active vaults/);
       });
     });
   });
@@ -1028,6 +1153,19 @@ describe('contracts.js - Unit Tests', () => {
         await expect(
           getVaultInfo(env.testVault.address, env.signers[0])
         ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
+      });
+
+      it('should wrap errors when the factory call rejects', async () => {
+        const stubProvider = {
+          _isProvider: true, // ethers v5 duck-types providers via this flag
+          getNetwork: async () => ({ chainId: 1337, name: 'arbitrum' }),
+          call: async () => { throw new Error('stub RPC call failed'); },
+          resolveName: async () => null,
+        };
+        Object.setPrototypeOf(stubProvider, ethers.providers.Provider.prototype);
+
+        await expect(getVaultInfo(env.testVault.address, stubProvider))
+          .rejects.toThrow(/Failed to get vault info/);
       });
     });
   });

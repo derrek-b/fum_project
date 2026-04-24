@@ -25,6 +25,15 @@ export function configureCoingecko({ apiKey } = {}) {
   }
 }
 
+/**
+ * Reset configuration to defaults (for testing purposes)
+ */
+export function resetCoingeckoConfig() {
+  _config = {
+    apiKey: null,
+  };
+}
+
 // API configuration constants
 const API_BASE_URL = 'https://api.coingecko.com/api/v3';
 
@@ -91,12 +100,12 @@ export function buildApiUrl(endpoint, params = {}) {
   }
 
   const apiKey = _config.apiKey;
-  const url = new URL(`${API_BASE_URL}${endpoint}`);
-
-  // Add API key if available
-  if (apiKey) {
-    url.searchParams.append('x_cg_demo_api_key', apiKey);
+  if (!apiKey) {
+    throw new Error('CoinGecko API key not configured. Call configureCoingecko({ apiKey }) or initFumLibrary({ coingeckoApiKey }) first.');
   }
+
+  const url = new URL(`${API_BASE_URL}${endpoint}`);
+  url.searchParams.append('x_cg_demo_api_key', apiKey);
 
   // Add other query parameters
   Object.entries(params).forEach(([key, value]) => {

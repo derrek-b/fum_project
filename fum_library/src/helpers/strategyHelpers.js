@@ -196,6 +196,8 @@ export function getStrategyDetails(strategyId) {
     borderColor: strategy.borderColor,
     textColor: strategy.textColor,
     supportedTokens: (() => {
+      // tokenSupport is validated against the enum above, so it's guaranteed
+      // to be one of these three values by the time we reach this switch.
       switch (strategy.tokenSupport) {
         case 'all':
           return getAllTokens();
@@ -203,8 +205,6 @@ export function getStrategyDetails(strategyId) {
           return getStablecoins();
         case 'custom':
           return strategy.supportedTokens;
-        default:
-          return {};
       }
     })(),
     minTokens: strategy.minTokens,

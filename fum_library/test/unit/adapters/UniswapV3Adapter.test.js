@@ -542,6 +542,25 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         expect(result.amount0).toBe(largeAmount);
       });
+
+      it('wraps decode failures as "Failed to parse swap event"', () => {
+        // Passes surface-level validation (correct event topic, 3 topics, data present)
+        // but data is too short for the expected 5-field decode. Ethers throws a generic
+        // decode error that doesn't start with "Log " or "Invalid swap", so the outer
+        // catch at 470-477 re-wraps it.
+        const swapInterface = new ethers.utils.Interface([
+          'event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)'
+        ]);
+        const correctTopic = swapInterface.getEventTopic('Swap');
+        const zeroAddrTopic = ethers.utils.hexZeroPad('0x' + '0'.repeat(40), 32);
+        expect(() =>
+          adapter.parseSwapEvent({
+            address: '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640',
+            topics: [correctTopic, zeroAddrTopic, zeroAddrTopic],
+            data: '0x00'
+          })
+        ).toThrow(/Failed to parse swap event:/);
+      });
     });
   });
 
@@ -688,6 +707,21 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should throw error for token1Data missing decimals', () => {
         expect(() => adapter.evaluatePriceMovement({ tick: 100 }, 100, mockToken0Data, { address: '0x123', symbol: 'WETH' }))
           .toThrow('token1Data must have address, symbol, and decimals properties');
+      });
+
+      it('should throw when baseline price is zero', () => {
+        // Spy-force tickToPrice to return a Price-like whose toSignificant yields '0'
+        // so the baselinePriceValue === 0 guard (544-545) fires without relying on
+        // extreme tick underflow that real SDK math wouldn't produce.
+        const zeroPrice = { toSignificant: () => '0' };
+        const spy = vi.spyOn(adapter, 'tickToPrice').mockReturnValueOnce(zeroPrice);
+        try {
+          expect(() =>
+            adapter.evaluatePriceMovement({ tick: 100 }, 0, mockToken0Data, mockToken1Data)
+          ).toThrow('Baseline price is zero, cannot calculate movement');
+        } finally {
+          spy.mockRestore();
+        }
       });
     });
 
@@ -1290,6 +1324,35 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         await expect(
           adapter._estimateGasFromTxData(signer, txData)
         ).rejects.toThrow("Transaction data must include 'to' field");
+      });
+
+      it('rejects non-string data field', async () => {
+        // Hits 668-669.
+        await expect(
+          adapter._estimateGasFromTxData(signer, {
+            to: env.signers[1].address,
+            data: 123,
+            value: 0
+          })
+        ).rejects.toThrow('Transaction data field must be a string');
+      });
+
+      it('rejects non-bigint/string/number value field', async () => {
+        // Hits 673-674.
+        await expect(
+          adapter._estimateGasFromTxData(signer, {
+            to: env.signers[1].address,
+            data: '0x',
+            value: {}
+          })
+        ).rejects.toThrow('Transaction value must be a valid bigint, string, or number');
+        await expect(
+          adapter._estimateGasFromTxData(signer, {
+            to: env.signers[1].address,
+            data: '0x',
+            value: []
+          })
+        ).rejects.toThrow('Transaction value must be a valid bigint, string, or number');
       });
     });
 
@@ -2289,6 +2352,21 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           adapter._checkPoolExists(token0, token1, 500, wrongChainProvider)
         ).rejects.toThrow('Provider chain 1 doesn\'t match adapter chain 1337');
       });
+
+      it('propagates errors from _getPoolAddress inside the try block', async () => {
+        // Hits the outer catch at 1089-1092 (plain rethrow). Spy _getPoolAddress
+        // to throw AFTER the pre-validation + chain check pass.
+        const token0 = { address: env.usdcAddress, decimals: 6 };
+        const token1 = { address: env.wethAddress, decimals: 18 };
+        const spy = vi.spyOn(adapter, '_getPoolAddress')
+          .mockRejectedValueOnce(new Error('synthetic factory failure'));
+        try {
+          await expect(adapter._checkPoolExists(token0, token1, 500, env.provider))
+            .rejects.toThrow('synthetic factory failure');
+        } finally {
+          spy.mockRestore();
+        }
+      });
     });
   });
 
@@ -2681,6 +2759,21 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           adapter._fetchPoolData(fakeToken1, fakeToken2, 500, env.provider)
         ).rejects.toThrow(/No token found at address.*on chain/);
       });
+
+      it('wraps slot0 failures as "Failed to fetch pool data"', async () => {
+        // Spy _getPoolAddress to return a dead address → new Contract constructs
+        // fine, but poolContract.slot0() throws inside the try → outer catch
+        // rewraps (1265-1267).
+        const spy = vi.spyOn(adapter, '_getPoolAddress')
+          .mockResolvedValueOnce('0x000000000000000000000000000000000000dEaD');
+        try {
+          await expect(
+            adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider)
+          ).rejects.toThrow(/Failed to fetch pool data:/);
+        } finally {
+          spy.mockRestore();
+        }
+      });
     });
   });
 
@@ -2737,6 +2830,15 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           adapter.getPoolData(validPoolAddress, null)
         ).rejects.toThrow('Provider parameter is required');
       });
+
+      it('wraps contract-call failures as "Failed to get pool data for ..."', async () => {
+        // Pass a valid-format but non-contract address so slot0/liquidity/fee calls
+        // inside the try block throw — outer catch rewraps (1329-1331).
+        const deadAddress = '0x000000000000000000000000000000000000dEaD';
+        await expect(
+          adapter.getPoolData(deadAddress, env.provider)
+        ).rejects.toThrow(/Failed to get pool data for /);
+      }, 15000);
     });
   });
 
@@ -3406,6 +3508,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           .toThrow('Invalid quoteToken.address: invalid-address');
       });
 
+      it('should throw when base and quote token addresses are the same', () => {
+        // Hits the same-address guard at 2085-2087.
+        const validSqrtPrice = '79228162514264337593543950336';
+        const sameToken = { address: getWrappedNativeAddress(1337), decimals: 18, symbol: 'ETH' };
+        expect(() => adapter.calculatePriceFromSqrtPrice(validSqrtPrice, sameToken, sameToken))
+          .toThrow('Base and quote token addresses cannot be the same');
+      });
+
       it('should throw error for invalid baseToken decimals', () => {
         const validSqrtPrice = '79228162514264337593543950336';
 
@@ -3726,6 +3836,22 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // Should be deterministic
         expect(price1.toSignificant(18)).toBe(price2.toSignificant(18));
       });
+
+      it('wraps SDK failures as "Failed to convert tick to price"', () => {
+        // tick=999999 passes Number.isFinite but is outside V3's valid tick range
+        // (±887272). The SDK's TickMath.getSqrtRatioAtTick throws, which the outer
+        // catch (2210-2213) logs + rewraps.
+        const baseToken = { address: env.wethAddress, decimals: 18, symbol: 'WETH' };
+        const quoteToken = { address: env.usdcAddress, decimals: 6, symbol: 'USDC' };
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+          expect(() => adapter.tickToPrice(999999, baseToken, quoteToken))
+            .toThrow(/Failed to convert tick to price:/);
+          expect(errSpy).toHaveBeenCalled();
+        } finally {
+          errSpy.mockRestore();
+        }
+      });
     });
   });
 
@@ -3998,6 +4124,19 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const tick2 = adapter.priceToTick(2600, tokenA, tokenB);
 
         expect(tick1).toBe(tick2);
+      });
+
+      it('wraps BigInt/SDK failures as "Failed to convert price to tick"', () => {
+        const baseToken = { address: env.wethAddress, decimals: 18, symbol: 'WETH' };
+        const quoteToken = { address: env.usdcAddress, decimals: 6, symbol: 'USDC' };
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+          expect(() => adapter.priceToTick(1e300, baseToken, quoteToken))
+            .toThrow(/Failed to convert price to tick:/);
+          expect(errSpy).toHaveBeenCalled();
+        } finally {
+          errSpy.mockRestore();
+        }
       });
     });
   });
@@ -4799,6 +4938,27 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(() => adapter.calculateUncollectedFees(validPosition, invalidTickUpperData))
           .toThrow('Invalid tickUpperData fee growth values: must be valid numeric strings');
       });
+
+      it('should throw error when feeGrowthGlobal0X128 is a non-numeric string', () => {
+        // typeof check at 2492 passes (it's a string); regex check at 2621 fails.
+        // Hits 2622-2623 and 2627-2628 (the BigInt() fallback on malformed digits).
+        expect(() =>
+          adapter.calculateUncollectedFees(validPosition, {
+            ...validPoolData,
+            feeGrowthGlobal0X128: 'not-a-number'
+          })
+        ).toThrow('Invalid feeGrowthGlobal0X128: must be a valid numeric string');
+      });
+
+      it('should throw error when feeGrowthGlobal1X128 is a non-numeric string', () => {
+        // Hits 2632-2633 and 2637-2638.
+        expect(() =>
+          adapter.calculateUncollectedFees(validPosition, {
+            ...validPoolData,
+            feeGrowthGlobal1X128: '0xbadhex'
+          })
+        ).toThrow('Invalid feeGrowthGlobal1X128: must be a valid numeric string');
+      });
     });
 
     describe('Special Cases', () => {
@@ -4878,7 +5038,13 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should handle fee growth delta underflow correctly', () => {
         // Create scenario where fee growth delta calculation goes negative
-        // This happens when current fee growth is less than last recorded fee growth
+        // This happens when current fee growth is less than last recorded fee growth.
+        // Using real fork tick data, token0's feeGrowthOutside values are large
+        // enough that feeGrowthInside0X128 triggers the 2661-2663 wrap path and
+        // ends up > feeGrowthInside0LastX128 — so delta0 stays positive and the
+        // 2674-2676 delta-wrap path isn't hit. Zero out the tick-data
+        // feeGrowthOutside fields for token0 so feeGrowthInside0X128 stays small
+        // and delta0 underflows, covering 2674-2676.
         const deltaUnderflowPosition = {
           ...validPosition,
           feeGrowthInside0LastX128: '999999999999999999999999999999999999999',
@@ -4888,7 +5054,19 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const deltaUnderflowPoolData = {
           ...validPoolData,
           feeGrowthGlobal0X128: '100000000000000000000000000000000000000',
-          feeGrowthGlobal1X128: '100000000000000000000000000000000000000'
+          feeGrowthGlobal1X128: '100000000000000000000000000000000000000',
+          ticks: {
+            [validPosition.tickLower]: {
+              ...validPoolData.ticks[validPosition.tickLower],
+              feeGrowthOutside0X128: '0',
+              feeGrowthOutside1X128: '0',
+            },
+            [validPosition.tickUpper]: {
+              ...validPoolData.ticks[validPosition.tickUpper],
+              feeGrowthOutside0X128: '0',
+              feeGrowthOutside1X128: '0',
+            },
+          },
         };
 
         const result = adapter.calculateUncollectedFees(deltaUnderflowPosition, deltaUnderflowPoolData);
@@ -5372,6 +5550,20 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           adapter.getPositionsForVDS(validAddress, {})
         ).rejects.toThrow('Valid provider parameter is required');
       });
+
+      it('wraps non-validation errors as "Failed to fetch positions for VDS"', async () => {
+        // Spy _fetchUserPositionIds (called inside the try block) to inject a
+        // non-validation error → outer catch at 1525-1527 rewraps it.
+        const spy = vi.spyOn(adapter, '_fetchUserPositionIds')
+          .mockRejectedValueOnce(new Error('synthetic fetch failure'));
+        try {
+          await expect(
+            adapter.getPositionsForVDS(env.testVault.address, env.provider)
+          ).rejects.toThrow('Failed to fetch positions for VDS: synthetic fetch failure');
+        } finally {
+          spy.mockRestore();
+        }
+      });
     });
   });
 
@@ -5675,6 +5867,20 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           adapter.getPositionsForDisplay(validAddress, {})
         ).rejects.toThrow('Valid provider parameter is required');
       });
+
+      it('wraps non-validation errors as "Failed to fetch positions for display"', async () => {
+        // Inducing a synthetic fetch failure through an internal helper exercises
+        // the outer catch rewrapper (1725-1733).
+        const spy = vi.spyOn(adapter, '_fetchUserPositionIds')
+          .mockRejectedValueOnce(new Error('synthetic fetch failure'));
+        try {
+          await expect(
+            adapter.getPositionsForDisplay(env.testVault.address, env.provider)
+          ).rejects.toThrow('Failed to fetch positions for display: synthetic fetch failure');
+        } finally {
+          spy.mockRestore();
+        }
+      });
     });
   });
 
@@ -5946,6 +6152,18 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // Position NFT still exists but has zero liquidity — should throw
         await expect(adapter.getPositionById(env.positionTokenId, env.provider))
           .rejects.toThrow('zero liquidity');
+
+        // refreshPositionForDisplay hits the same zero-liquidity guard at 1771-1773.
+        // Piggy-backing here avoids setting up a second close/revert cycle.
+        await expect(adapter.refreshPositionForDisplay(env.positionTokenId.toString(), env.provider))
+          .rejects.toThrow(`Position ${env.positionTokenId.toString()} has zero liquidity`);
+
+        // getPositionsForDisplay with every position zero-liquidity hits the
+        // all-filtered-out early return at 1578-1580. Prior tests may have
+        // transferred additional zero-liq NFTs into the vault; all are filtered
+        // out here, so the result shape is still {positions: {}}.
+        const displayResult = await adapter.getPositionsForDisplay(env.testVault.address, env.provider);
+        expect(displayResult.positions).toEqual({});
 
         // Revert to restore the position's liquidity for subsequent tests
         await env.revert(localSnapshot);
@@ -6459,6 +6677,32 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           }
         });
       });
+
+      it('logs + rethrows SDK failures from the outer catch', async () => {
+        // Inverted ticks pass our shape validation (both finite numbers) but the
+        // V3 SDK's Position constructor rejects tickLower >= tickUpper — hitting
+        // the outer catch that console.errors and rethrows (2946-2949).
+        const vaultAddress = env.testVault.address;
+        const positions = await adapter.getPositionsForVDS(vaultAddress, env.provider);
+        const realPosition = Object.values(positions.positions)[0];
+        const realPoolData = await adapter._fetchPoolData(env.wethAddress, env.usdcAddress, 500, env.provider);
+        const invertedPosition = {
+          ...realPosition,
+          tickLower: realPosition.tickUpper,
+          tickUpper: realPosition.tickLower
+        };
+        const token0Data = { address: realPoolData.token0.address, decimals: realPoolData.token0.decimals };
+        const token1Data = { address: realPoolData.token1.address, decimals: realPoolData.token1.decimals };
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+          await expect(
+            adapter.calculateTokenAmounts(invertedPosition, realPoolData, token0Data, token1Data)
+          ).rejects.toThrow();
+          expect(errSpy).toHaveBeenCalledWith('Error calculating token amounts:', expect.anything());
+        } finally {
+          errSpy.mockRestore();
+        }
+      });
     });
   });
 
@@ -6880,7 +7124,109 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           adapter.selectBestPool('ETH', 'USDC', env.provider, 999999)
         ).rejects.toThrow(/configured for chain/);
       });
+
+      it('should throw when non-native token has no address on requested chain', async () => {
+        // AUSD is a real config token but only on Avalanche (43114, 1338), not 1337.
+        // Hits the `token.addresses[chainId] === undefined` branch in resolveTokenData.
+        await expect(
+          adapter.selectBestPool('AUSD', 'USDC', env.provider, chainId)
+        ).rejects.toThrow(`Token AUSD not available on chain ${chainId}`);
+      });
+
+      it('should throw "No pools found" when every fee tier returns zero address', async () => {
+        // Spy-force every _getPoolAddress call to return AddressZero, which exercises
+        // both the `continue` branch on missing pools AND the empty-pools throw above it.
+        const spy = vi.spyOn(adapter, '_getPoolAddress').mockResolvedValue(ethers.constants.AddressZero);
+        try {
+          await expect(
+            adapter.selectBestPool('USDC', 'ETH', env.provider, chainId)
+          ).rejects.toThrow(/No pools found for USDC\/ETH/);
+        } finally {
+          spy.mockRestore();
+        }
+      });
+
+      it('should throw "No active pools" when every discovered pool has zero liquidity', async () => {
+        // Spy-force _discoverAvailablePools to return fabricated pools with zero liquidity
+        // so the downstream activePools filter empties out and we hit the liquidity-guard throw.
+        const spy = vi.spyOn(adapter, '_discoverAvailablePools').mockResolvedValue([
+          {
+            address: '0x0000000000000000000000000000000000000001',
+            fee: 500,
+            liquidity: '0',
+            sqrtPriceX96: '1',
+            tick: 0,
+            token0: { symbol: 'USDC', address: 'a', decimals: 6, isNative: false },
+            token1: { symbol: 'WETH', address: 'b', decimals: 18, isNative: false }
+          },
+          {
+            address: '0x0000000000000000000000000000000000000002',
+            fee: 3000,
+            liquidity: '0',
+            sqrtPriceX96: '1',
+            tick: 0,
+            token0: { symbol: 'USDC', address: 'a', decimals: 6, isNative: false },
+            token1: { symbol: 'WETH', address: 'b', decimals: 18, isNative: false }
+          }
+        ]);
+        try {
+          await expect(
+            adapter.selectBestPool('USDC', 'ETH', env.provider, chainId)
+          ).rejects.toThrow(/No active pools for USDC\/ETH.*2 pools exist but all have zero liquidity/);
+        } finally {
+          spy.mockRestore();
+        }
+      });
     });
+  });
+
+  describe('_discoverAvailablePools retry + partial-tier behavior', () => {
+    const chainId = 1337;
+
+    it('should skip fee tiers that return AddressZero and include only real pools', async () => {
+      // Return a real (but unimportant) pool for the 500 tier, AddressZero for the rest.
+      // This exercises the `continue` branch (3086-3087) while still returning a populated list.
+      const realPool = await adapter._getPoolAddress(
+        getTokenBySymbol('USDC').addresses[chainId],
+        getWrappedNativeAddress(chainId),
+        500,
+        env.provider
+      );
+      // Sanity: fork actually has a 0.05% USDC/WETH pool
+      expect(realPool).not.toBe(ethers.constants.AddressZero);
+
+      const spy = vi.spyOn(adapter, '_getPoolAddress').mockImplementation(async (_t0, _t1, fee) => {
+        if (fee === 500) return realPool;
+        return ethers.constants.AddressZero;
+      });
+      try {
+        const pools = await adapter._discoverAvailablePools('USDC', 'ETH', env.provider, chainId);
+        expect(pools.length).toBe(1);
+        expect(pools[0].fee).toBe(500);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('should throw "failed after retry" when both pool-data fetches fail', async () => {
+      // Point a real pool lookup at an address that has no contract code on the fork.
+      // slot0() / liquidity() will revert on both the initial call and the retry,
+      // exercising lines 3098-3111 (transient-error warn + retry + final throw).
+      const deadAddress = '0x000000000000000000000000000000000000dEaD';
+      const spy = vi.spyOn(adapter, '_getPoolAddress').mockImplementation(async (_t0, _t1, fee) => {
+        return fee === 500 ? deadAddress : ethers.constants.AddressZero;
+      });
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        await expect(
+          adapter._discoverAvailablePools('USDC', 'ETH', env.provider, chainId)
+        ).rejects.toThrow(/failed after retry/);
+        expect(warnSpy).toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+        warnSpy.mockRestore();
+      }
+    }, 15000);
   });
 
   describe('evaluatePositionRange', () => {
@@ -7177,11 +7523,97 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
     });
 
-    // Note: Full integration tests for batchSwapTransactions require:
-    // - Real token balances
-    // - Valid Permit2 approval
-    // - Real swap routes
-    // These are covered in fum_automation integration tests
+    describe('Integration - Fork', () => {
+      it('generates a native ETH -> USDC swap transaction (skips Permit2)', async () => {
+        const instructions = [{
+          tokenIn: {
+            address: ethers.constants.AddressZero,
+            symbol: 'ETH',
+            decimals: 18,
+            isNative: true,
+          },
+          tokenOut: {
+            address: env.usdcAddress,
+            symbol: 'USDC',
+            decimals: 6,
+          },
+          amount: ethers.utils.parseEther('0.01').toString(),
+          isAmountIn: true,
+        }];
+
+        const result = await adapter.batchSwapTransactions(instructions, {
+          signer: env.signers[0],
+          provider: env.provider,
+          chainId: 1337,
+          recipient: env.testVault.address,
+          slippageTolerance: 1,
+        });
+
+        expect(result.transactions).toHaveLength(1);
+        expect(result.metadata).toHaveLength(1);
+
+        const tx = result.transactions[0];
+        expect(tx).toHaveProperty('to');
+        expect(tx).toHaveProperty('data');
+        expect(tx).toHaveProperty('value');
+        // Native input: value should be the ETH amount being swapped
+        expect(ethers.BigNumber.from(tx.value).eq(ethers.utils.parseEther('0.01'))).toBe(true);
+
+        const md = result.metadata[0];
+        expect(md.tokenInSymbol).toBe('ETH');
+        expect(md.tokenOutSymbol).toBe('USDC');
+        expect(md.isAmountIn).toBe(true);
+        expect(Array.isArray(md.routes)).toBe(true);
+        expect(md.routes.length).toBeGreaterThan(0);
+      }, 120000);
+
+      it('generates batched WETH -> USDC swaps using the Permit2 nonce tracker', async () => {
+        // Two instructions with the SAME tokenIn so the second one exercises
+        // the _nonceTracker.has(tokenIn.address) branch instead of fetching
+        // the nonce from Permit2 again.
+        const instructions = [
+          {
+            tokenIn: { address: env.wethAddress, symbol: 'WETH', decimals: 18 },
+            tokenOut: { address: env.usdcAddress, symbol: 'USDC', decimals: 6 },
+            amount: ethers.utils.parseEther('0.01').toString(),
+            isAmountIn: true,
+          },
+          {
+            tokenIn: { address: env.wethAddress, symbol: 'WETH', decimals: 18 },
+            tokenOut: { address: env.usdcAddress, symbol: 'USDC', decimals: 6 },
+            amount: ethers.utils.parseEther('0.02').toString(),
+            isAmountIn: true,
+          },
+        ];
+
+        const result = await adapter.batchSwapTransactions(instructions, {
+          signer: env.signers[0],
+          provider: env.provider,
+          chainId: 1337,
+          recipient: env.testVault.address,
+          slippageTolerance: 1,
+        });
+
+        expect(result.transactions).toHaveLength(2);
+        expect(result.metadata).toHaveLength(2);
+
+        // Both transactions should target the UniversalRouter with non-empty calldata
+        for (const tx of result.transactions) {
+          expect(tx).toHaveProperty('to');
+          expect(tx).toHaveProperty('data');
+          expect(typeof tx.data).toBe('string');
+          expect(tx.data.startsWith('0x')).toBe(true);
+          expect(tx.data.length).toBeGreaterThan(2);
+        }
+
+        // Both metadata entries should reflect WETH -> USDC
+        for (const md of result.metadata) {
+          expect(md.tokenInSymbol).toBe('WETH');
+          expect(md.tokenOutSymbol).toBe('USDC');
+          expect(md.isAmountIn).toBe(true);
+        }
+      }, 180000);
+    });
   });
 
   describe('generateClaimFeesData', () => {
@@ -7408,6 +7840,43 @@ describe('UniswapV3Adapter - Unit Tests', () => {
             walletAddress: env.testVault.address
           })).rejects.toThrow();
         }, 60000);
+
+        it('throws when adapter lacks positionManagerAddress and tokens must be self-resolved', async () => {
+          // Hits 3217-3219: when token data is NOT provided, method tries to look
+          // them up via positionManagerAddress — broken adapter throws early.
+          const brokenAdapter = new (class extends adapter.constructor {
+            constructor() {
+              super(1337);
+              this.addresses = { ...this.addresses, positionManagerAddress: null };
+            }
+          })();
+          await expect(brokenAdapter.generateClaimFeesData({
+            position: env.testPosition,
+            provider: env.provider,
+            walletAddress: env.testVault.address
+            // token data intentionally omitted → self-resolve path
+          })).rejects.toThrow('No position manager address found for chainId: 1337');
+        });
+
+        it('throws when adapter lacks positionManagerAddress and tokens are provided', async () => {
+          // Hits 3238-3240: second positionManagerAddress guard inside the try block.
+          // Token data is supplied so the self-resolve branch is skipped.
+          const brokenAdapter = new (class extends adapter.constructor {
+            constructor() {
+              super(1337);
+              this.addresses = { ...this.addresses, positionManagerAddress: null };
+            }
+          })();
+          await expect(brokenAdapter.generateClaimFeesData({
+            position: env.testPosition,
+            provider: env.provider,
+            walletAddress: env.testVault.address,
+            token0Address: env.usdcAddress,
+            token1Address: env.wethAddress,
+            token0Decimals: 6,
+            token1Decimals: 18
+          })).rejects.toThrow('No position manager address found for chainId: 1337');
+        });
       });
     });
 
@@ -7895,9 +8364,23 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           await expect(
             adapter.generateRemoveLiquidityData({
               ...baseParams,
+              poolData: { ...baseParams.poolData, sqrtPriceX96: 'not-a-number' }
+            })
+          ).rejects.toThrow('Pool data sqrtPriceX96 must be a positive numeric string');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({
+              ...baseParams,
               poolData: { ...baseParams.poolData, liquidity: 123 }
             })
           ).rejects.toThrow('Pool data liquidity must be a string');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({
+              ...baseParams,
+              poolData: { ...baseParams.poolData, liquidity: 'not-numeric' }
+            })
+          ).rejects.toThrow('Pool data liquidity must be a positive numeric string');
 
           await expect(
             adapter.generateRemoveLiquidityData({
@@ -8020,6 +8503,87 @@ describe('UniswapV3Adapter - Unit Tests', () => {
             ).rejects.toThrow('Deadline minutes must be greater than 0');
           }
         });
+      });
+
+      it('wraps non-validation errors as "Failed to generate remove liquidity data"', async () => {
+        // sortTokens is called inside the try block — spy it to throw a generic
+        // error so the outer catch (3577-3580) logs + rewraps.
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const sortSpy = vi.spyOn(adapter, 'sortTokens').mockImplementationOnce(() => {
+          throw new Error('synthetic sort failure');
+        });
+        try {
+          await expect(
+            adapter.generateRemoveLiquidityData({
+              position: {
+                id: env.positionTokenId.toString(),
+                tickLower: env.testPosition.tickLower,
+                tickUpper: env.testPosition.tickUpper,
+              },
+              percentage: 100,
+              provider: env.provider,
+              walletAddress: env.testVault.address,
+              poolData: env.poolData,
+              token0Data: env.poolData.token0,
+              token1Data: env.poolData.token1,
+              slippageTolerance: 1,
+              deadlineMinutes: 2
+            })
+          ).rejects.toThrow('Failed to generate remove liquidity data: synthetic sort failure');
+        } finally {
+          sortSpy.mockRestore();
+          errSpy.mockRestore();
+        }
+      });
+
+      it('throws when adapter lacks positionManagerAddress', async () => {
+        // Hits the no-PM guard at 3453-3455 inside the try block.
+        const brokenAdapter = new (class extends adapter.constructor {
+          constructor() {
+            super(1337);
+            this.addresses = { ...this.addresses, positionManagerAddress: null };
+          }
+        })();
+        await expect(brokenAdapter.generateRemoveLiquidityData({
+          position: {
+            id: env.positionTokenId.toString(),
+            tickLower: env.testPosition.tickLower,
+            tickUpper: env.testPosition.tickUpper,
+          },
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: env.testVault.address,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 2
+        })).rejects.toThrow('No position manager address found for chainId: 1337');
+      });
+
+      it('throws "Token mismatch" when provided token data contradicts on-chain position tokens', async () => {
+        // Hits 3487-3491. Provide token0Data/token1Data with valid but wrong
+        // addresses — the post-sortTokens check vs positionManager.positions()
+        // detects the disagreement.
+        await expect(adapter.generateRemoveLiquidityData({
+          position: {
+            id: env.positionTokenId.toString(),
+            tickLower: env.testPosition.tickLower,
+            tickUpper: env.testPosition.tickUpper,
+          },
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: env.testVault.address,
+          poolData: env.poolData,
+          // These are valid token addresses but NOT what positionManager.positions
+          // returns for this position (which is USDC/WETH).
+          token0Data: { address: '0x0000000000000000000000000000000000000001', decimals: 6 },
+          token1Data: { address: '0x0000000000000000000000000000000000000002', decimals: 18 },
+          token0IsNative: false,
+          token1IsNative: false,
+          slippageTolerance: 1,
+          deadlineMinutes: 2
+        })).rejects.toThrow(/Token mismatch: position tokens/);
       });
     });
 
@@ -8217,6 +8781,26 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result.principalByPosition).toEqual({});
         expect(result.feesByPosition).toEqual({});
       });
+
+      it('silently skips logs with matching topic but malformed data', async () => {
+        // Fabricate logs whose topics[0] matches DecreaseLiquidity/Collect but with
+        // garbage data — parseLog throws and the loop's catch (3637-3639, 3661-3663)
+        // continues. Using the adapter's own interface guarantees topic match.
+        const decreaseLiquidityTopic = adapter.positionManagerInterface.getEventTopic('DecreaseLiquidity');
+        const collectTopic = adapter.positionManagerInterface.getEventTopic('Collect');
+        const garbageReceipt = {
+          logs: [
+            { address: '0x0000000000000000000000000000000000000001', topics: [decreaseLiquidityTopic], data: '0x00' },
+            { address: '0x0000000000000000000000000000000000000001', topics: [collectTopic], data: '0x00' }
+          ]
+        };
+        const positionMetadata = {
+          '12345': { position: { id: '12345' }, token0Data: { symbol: 'USDC' }, token1Data: { symbol: 'WETH' } }
+        };
+        const result = await adapter.parseClosureReceipt(garbageReceipt, positionMetadata);
+        expect(result.principalByPosition).toEqual({});
+        expect(result.feesByPosition).toEqual({});
+      });
     });
 
     describe('Error Cases', () => {
@@ -8367,6 +8951,20 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         const result = await adapter.parseCollectReceipt(receipt, positionMetadata);
 
+        expect(result.feesByPosition).toEqual({});
+      });
+
+      it('silently skips logs with matching Collect topic but malformed data', async () => {
+        // Matching topic0 forces the decode branch; malformed data makes parseLog
+        // throw, which the loop's catch (3719-3721) silently continues past.
+        const collectTopic = adapter.positionManagerInterface.getEventTopic('Collect');
+        const receipt = {
+          logs: [{ address: '0x0000000000000000000000000000000000000001', topics: [collectTopic], data: '0x00' }]
+        };
+        const positionMetadata = {
+          '12345': { position: { id: '12345' }, token0Data: { symbol: 'USDC' }, token1Data: { symbol: 'WETH' } }
+        };
+        const result = await adapter.parseCollectReceipt(receipt, positionMetadata);
         expect(result.feesByPosition).toEqual({});
       });
     });
@@ -8982,6 +9580,93 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           }
         });
       });
+
+      describe('Shape validation (consolidated)', () => {
+        const call = (overrides) => adapter._getAddLiquidityQuote({ ...baseParams, ...overrides });
+
+        it('rejects invalid poolData.fee shape variants', async () => {
+          await expect(call({ poolData: { ...baseParams.poolData, fee: null } }))
+            .rejects.toThrow('Pool data fee is required');
+          await expect(call({ poolData: { ...baseParams.poolData, fee: -1 } }))
+            .rejects.toThrow('Pool data fee must be a non-negative finite number');
+          await expect(call({ poolData: { ...baseParams.poolData, fee: Infinity } }))
+            .rejects.toThrow('Pool data fee must be a non-negative finite number');
+        });
+
+        it('rejects invalid poolData.sqrtPriceX96 shape variants', async () => {
+          await expect(call({ poolData: { ...baseParams.poolData, sqrtPriceX96: null } }))
+            .rejects.toThrow('Pool data sqrtPriceX96 is required');
+          await expect(call({ poolData: { ...baseParams.poolData, sqrtPriceX96: 12345 } }))
+            .rejects.toThrow('Pool data sqrtPriceX96 must be a string');
+          await expect(call({ poolData: { ...baseParams.poolData, sqrtPriceX96: 'abc' } }))
+            .rejects.toThrow('Pool data sqrtPriceX96 must be a positive numeric string');
+        });
+
+        it('rejects invalid poolData.liquidity shape variants', async () => {
+          await expect(call({ poolData: { ...baseParams.poolData, liquidity: null } }))
+            .rejects.toThrow('Pool data liquidity is required');
+          await expect(call({ poolData: { ...baseParams.poolData, liquidity: 12345 } }))
+            .rejects.toThrow('Pool data liquidity must be a string');
+          await expect(call({ poolData: { ...baseParams.poolData, liquidity: 'abc' } }))
+            .rejects.toThrow('Pool data liquidity must be a positive numeric string');
+        });
+
+        it('rejects invalid poolData.tick shape variants', async () => {
+          await expect(call({ poolData: { ...baseParams.poolData, tick: null } }))
+            .rejects.toThrow('Pool data tick is required');
+          await expect(call({ poolData: { ...baseParams.poolData, tick: NaN } }))
+            .rejects.toThrow('Pool data tick must be a finite number');
+        });
+
+        it('rejects invalid token address shape variants', async () => {
+          await expect(call({ token0Data: { ...baseParams.token0Data, address: '' } }))
+            .rejects.toThrow('Token0 address is required');
+          await expect(call({ token0Data: { ...baseParams.token0Data, address: 12345 } }))
+            .rejects.toThrow('Token0 address must be a string');
+          await expect(call({ token0Data: { ...baseParams.token0Data, address: 'not-an-address' } }))
+            .rejects.toThrow('Invalid token0 address');
+          await expect(call({ token1Data: { ...baseParams.token1Data, address: '' } }))
+            .rejects.toThrow('Token1 address is required');
+          await expect(call({ token1Data: { ...baseParams.token1Data, address: 12345 } }))
+            .rejects.toThrow('Token1 address must be a string');
+          await expect(call({ token1Data: { ...baseParams.token1Data, address: 'not-an-address' } }))
+            .rejects.toThrow('Invalid token1 address');
+        });
+
+        it('rejects out-of-range token1Data.decimals', async () => {
+          // Hits 4416-4417 (token1 decimals 0-255 range guard).
+          await expect(call({ token1Data: { ...baseParams.token1Data, decimals: 256 } }))
+            .rejects.toThrow('Token1 decimals must be a finite number between 0 and 255');
+          await expect(call({ token1Data: { ...baseParams.token1Data, decimals: -1 } }))
+            .rejects.toThrow('Token1 decimals must be a finite number between 0 and 255');
+        });
+      });
+
+      it('wraps non-validation errors as "Failed to calculate add liquidity quote"', async () => {
+        // sortTokens is the first call inside the try block — spy it to make the
+        // outer catch (4499-4502) log + rewrap.
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const sortSpy = vi.spyOn(adapter, 'sortTokens').mockImplementationOnce(() => {
+          throw new Error('synthetic sort failure');
+        });
+        try {
+          await expect(
+            adapter._getAddLiquidityQuote({
+              position: { tickLower: env.testPosition.tickLower, tickUpper: env.testPosition.tickUpper },
+              token0Amount: '1000000',
+              token1Amount: '1000000000000000000',
+              provider: env.provider,
+              poolData,
+              token0Data: { address: env.usdcAddress, decimals: 6 },
+              token1Data: { address: env.wethAddress, decimals: 18 }
+            })
+          ).rejects.toThrow('Failed to calculate add liquidity quote: synthetic sort failure');
+        } finally {
+          sortSpy.mockRestore();
+          errSpy.mockRestore();
+        }
+      });
     });
   });
 
@@ -9508,6 +10193,53 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           ).rejects.toThrow('Token0 and token1 addresses cannot be the same');
         });
       });
+
+      describe('Shape validation (consolidated)', () => {
+        const call = (overrides) => adapter._getAddLiquidityAmounts({ ...baseParams, ...overrides });
+
+        it('rejects invalid poolData.sqrtPriceX96 shape variants', async () => {
+          await expect(call({ poolData: { ...baseParams.poolData, sqrtPriceX96: null } }))
+            .rejects.toThrow('Pool data sqrtPriceX96 is required');
+          await expect(call({ poolData: { ...baseParams.poolData, sqrtPriceX96: 12345 } }))
+            .rejects.toThrow('Pool data sqrtPriceX96 must be a string');
+          await expect(call({ poolData: { ...baseParams.poolData, sqrtPriceX96: 'abc' } }))
+            .rejects.toThrow('Pool data sqrtPriceX96 must be a positive numeric string');
+        });
+
+        it('rejects invalid poolData.liquidity shape variants', async () => {
+          await expect(call({ poolData: { ...baseParams.poolData, liquidity: null } }))
+            .rejects.toThrow('Pool data liquidity is required');
+          await expect(call({ poolData: { ...baseParams.poolData, liquidity: 12345 } }))
+            .rejects.toThrow('Pool data liquidity must be a string');
+          await expect(call({ poolData: { ...baseParams.poolData, liquidity: 'abc' } }))
+            .rejects.toThrow('Pool data liquidity must be a positive numeric string');
+        });
+
+        it('rejects invalid token address shape variants', async () => {
+          await expect(call({ token0Data: { ...baseParams.token0Data, address: 12345 } }))
+            .rejects.toThrow('Token0 address must be a string');
+          await expect(call({ token1Data: { ...baseParams.token1Data, address: 12345 } }))
+            .rejects.toThrow('Token1 address must be a string');
+        });
+
+        it('rejects invalid decimals shape variants', async () => {
+          await expect(call({ token1Data: { ...baseParams.token1Data, decimals: 256 } }))
+            .rejects.toThrow('Token1 decimals must be a finite number between 0 and 255');
+        });
+
+        it('wraps non-validation errors as "Failed to calculate add liquidity amounts"', async () => {
+          // Spy _getAddLiquidityQuote (called inside the try block) to inject a
+          // non-validation error → outer catch at 4716-4718 rewraps it.
+          const spy = vi.spyOn(adapter, '_getAddLiquidityQuote')
+            .mockRejectedValueOnce(new Error('synthetic quote failure'));
+          try {
+            await expect(call({}))
+              .rejects.toThrow('Failed to calculate add liquidity amounts: synthetic quote failure');
+          } finally {
+            spy.mockRestore();
+          }
+        });
+      });
     });
   });
 
@@ -9741,6 +10473,22 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         delete params.provider;
         await expect(adapter.getOptimalTokenRatio(params))
           .rejects.toThrow('provider is required');
+      });
+
+      it('should throw "Test quote returned zero amounts" when both returned amounts are zero', async () => {
+        // Spy _getAddLiquidityAmounts to return zero amounts → totalValueUSD = 0 →
+        // hits the 4800-4802 guard. The success path never produces this legitimately.
+        const spy = vi.spyOn(adapter, '_getAddLiquidityAmounts').mockResolvedValueOnce({
+          token0Amount: '0',
+          token1Amount: '0',
+          liquidity: '0'
+        });
+        try {
+          await expect(adapter.getOptimalTokenRatio(getBaseParams()))
+            .rejects.toThrow('Test quote returned zero amounts for both tokens');
+        } finally {
+          spy.mockRestore();
+        }
       });
     });
   });
@@ -10189,6 +10937,40 @@ describe('UniswapV3Adapter - Unit Tests', () => {
             provider: env.provider
           })
         ).rejects.toThrow('Failed to get swap quote');
+      });
+
+      describe('Shape validation (consolidated)', () => {
+        const baseParams = () => ({
+          tokenInAddress: env.usdcAddress,
+          tokenOutAddress: env.wethAddress,
+          fee: 500,
+          amountIn: ethers.utils.parseUnits('100', 6).toString(),
+          provider: env.provider
+        });
+        const call = (overrides) => adapter._getSwapQuote({ ...baseParams(), ...overrides });
+
+        it('rejects non-string amountIn variants', async () => {
+          // Hits the `typeof amountIn !== 'string'` branch (4860-4861).
+          await expect(call({ amountIn: 123 }))
+            .rejects.toThrow('AmountIn must be a string');
+          await expect(call({ amountIn: {} }))
+            .rejects.toThrow('AmountIn must be a string');
+          await expect(call({ amountIn: [] }))
+            .rejects.toThrow('AmountIn must be a string');
+        });
+
+        it('throws when adapter has no quoter address for its chain', async () => {
+          // Hits the quoter-address-missing branch (4874-4875).
+          const brokenAdapter = new (class extends adapter.constructor {
+            constructor() {
+              super(1337);
+              this.addresses = { ...this.addresses, quoterAddress: null };
+            }
+          })();
+          await expect(
+            brokenAdapter._getSwapQuote(baseParams())
+          ).rejects.toThrow(`No Uniswap V3 quoter address found for chainId: 1337`);
+        });
       });
     });
   });
@@ -10674,6 +11456,28 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           })
         ).rejects.toThrow('Failed to generate swap data');
       });
+
+      it('throws when adapter lacks routerAddress', async () => {
+        // Hits the no-router guard at 5425-5427. _generateSwapData takes tokenIn
+        // and tokenOut as bare address strings (not objects like sibling methods).
+        const brokenAdapter = new (class extends adapter.constructor {
+          constructor() {
+            super(1337);
+            this.addresses = { ...this.addresses, routerAddress: null };
+          }
+        })();
+        await expect(brokenAdapter._generateSwapData({
+          tokenIn: env.usdcAddress,
+          tokenOut: env.wethAddress,
+          fee: 500,
+          recipient: env.testVault.address,
+          amountIn: ethers.utils.parseUnits('100', 6).toString(),
+          slippageTolerance: 0.5,
+          sqrtPriceLimitX96: "0",
+          deadlineMinutes: 30,
+          provider: env.provider
+        })).rejects.toThrow('No Uniswap V3 router address found for chainId: 1337');
+      });
     });
   });
 
@@ -10945,276 +11749,387 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       describe('Position validation', () => {
         it('should throw error for missing position', async () => {
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, position: null })
-        ).rejects.toThrow('Position parameter is required');
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, position: undefined })
-        ).rejects.toThrow('Position parameter is required');
-      });
-
-      it('should throw error for non-object position', async () => {
-        const invalidTypes = ['string', 123, true, []];
-        for (const invalidType of invalidTypes) {
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, position: invalidType })
-          ).rejects.toThrow('Position must be an object');
-        }
-      });
-
-      it('should throw error for missing position ID', async () => {
-        const invalidPositions = [
-          { tickLower: -202410, tickUpper: -201090 },
-          { id: null, tickLower: -202410, tickUpper: -201090 },
-          { id: undefined, tickLower: -202410, tickUpper: -201090 }
-        ];
-        for (const invalidPosition of invalidPositions) {
+            adapter.generateAddLiquidityData({ ...baseParams, position: null })
+          ).rejects.toThrow('Position parameter is required');
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, position: invalidPosition })
-          ).rejects.toThrow('Position ID is required');
-        }
-      });
+            adapter.generateAddLiquidityData({ ...baseParams, position: undefined })
+          ).rejects.toThrow('Position parameter is required');
+        });
 
-      it('should throw error for non-string position ID', async () => {
-        const invalidIds = [123, true, false, {}, []];
-        for (const invalidId of invalidIds) {
+        it('should throw error for non-object position', async () => {
+          const invalidTypes = ['string', 123, true, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, position: invalidType })
+            ).rejects.toThrow('Position must be an object');
+          }
+        });
+
+        it('should throw error for missing position ID', async () => {
+          const invalidPositions = [
+            { tickLower: -202410, tickUpper: -201090 },
+            { id: null, tickLower: -202410, tickUpper: -201090 },
+            { id: undefined, tickLower: -202410, tickUpper: -201090 }
+          ];
+          for (const invalidPosition of invalidPositions) {
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, position: invalidPosition })
+            ).rejects.toThrow('Position ID is required');
+          }
+        });
+
+        it('should throw error for non-string position ID', async () => {
+          const invalidIds = [123, true, false, {}, []];
+          for (const invalidId of invalidIds) {
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, position: { ...baseParams.position, id: invalidId } })
+            ).rejects.toThrow('Position ID must be a string');
+          }
+        });
+
+        it('should throw error for non-numeric position ID', async () => {
+          const invalidIds = ['', 'abc', '12abc', '12.5', '-12', '12-34', ' 123', '123 '];
+          for (const invalidId of invalidIds) {
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, position: { ...baseParams.position, id: invalidId } })
+            ).rejects.toThrow('Position ID must be a numeric string');
+          }
+        });
+
+        it('should throw error for invalid tick values', async () => {
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, position: { ...baseParams.position, id: invalidId } })
-          ).rejects.toThrow('Position ID must be a string');
-        }
-      });
-
-      it('should throw error for non-numeric position ID', async () => {
-        const invalidIds = ['', 'abc', '12abc', '12.5', '-12', '12-34', ' 123', '123 '];
-        for (const invalidId of invalidIds) {
+            adapter.generateAddLiquidityData({ ...baseParams, position: { ...baseParams.position, tickLower: null } })
+          ).rejects.toThrow('Position tickLower is required');
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, position: { ...baseParams.position, id: invalidId } })
-          ).rejects.toThrow('Position ID must be a numeric string');
-        }
-      });
-
-      it('should throw error for invalid tick values', async () => {
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, position: { ...baseParams.position, tickLower: null } })
-        ).rejects.toThrow('Position tickLower is required');
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, position: { ...baseParams.position, tickUpper: null } })
-        ).rejects.toThrow('Position tickUpper is required');
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, position: { ...baseParams.position, tickLower: NaN } })
-        ).rejects.toThrow('Position tickLower must be a finite number');
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, position: { ...baseParams.position, tickUpper: Infinity } })
-        ).rejects.toThrow('Position tickUpper must be a finite number');
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, position: { ...baseParams.position, tickLower: baseParams.position.tickUpper, tickUpper: baseParams.position.tickLower } })
-        ).rejects.toThrow('Position tickLower must be less than tickUpper');
-      });
-    });
-
-    describe('Token0 amount validation', () => {
-      it('should throw error for missing token0Amount', async () => {
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, token0Amount: null })
-        ).rejects.toThrow('Token0 amount is required');
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, token0Amount: undefined })
-        ).rejects.toThrow('Token0 amount is required');
-      });
-
-      it('should throw error for non-string token0Amount', async () => {
-        const invalidTypes = [123, true, false, {}, []];
-        for (const invalidType of invalidTypes) {
+            adapter.generateAddLiquidityData({ ...baseParams, position: { ...baseParams.position, tickUpper: null } })
+          ).rejects.toThrow('Position tickUpper is required');
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, token0Amount: invalidType })
-          ).rejects.toThrow('Token0 amount must be a string');
-        }
-      });
-
-      it('should throw error for invalid token0Amount format', async () => {
-        const invalidAmounts = ['', 'abc', '12.5', '-100', '12abc', ' 123', '123 '];
-        for (const invalidAmount of invalidAmounts) {
+            adapter.generateAddLiquidityData({ ...baseParams, position: { ...baseParams.position, tickLower: NaN } })
+          ).rejects.toThrow('Position tickLower must be a finite number');
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, token0Amount: invalidAmount })
-          ).rejects.toThrow('Token0 amount must be a positive numeric string');
-        }
-      });
-
-      it('should throw error when both token amounts are zero', async () => {
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, token0Amount: '0', token1Amount: '0' })
-        ).rejects.toThrow('At least one token amount must be greater than 0');
-      });
-    });
-
-    describe('Token1 amount validation', () => {
-      it('should throw error for missing token1Amount', async () => {
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, token1Amount: null })
-        ).rejects.toThrow('Token1 amount is required');
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, token1Amount: undefined })
-        ).rejects.toThrow('Token1 amount is required');
-      });
-
-      it('should throw error for non-string token1Amount', async () => {
-        const invalidTypes = [123, true, false, {}, []];
-        for (const invalidType of invalidTypes) {
+            adapter.generateAddLiquidityData({ ...baseParams, position: { ...baseParams.position, tickUpper: Infinity } })
+          ).rejects.toThrow('Position tickUpper must be a finite number');
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, token1Amount: invalidType })
-          ).rejects.toThrow('Token1 amount must be a string');
-        }
+            adapter.generateAddLiquidityData({ ...baseParams, position: { ...baseParams.position, tickLower: baseParams.position.tickUpper, tickUpper: baseParams.position.tickLower } })
+          ).rejects.toThrow('Position tickLower must be less than tickUpper');
+        });
       });
 
-      it('should throw error for invalid token1Amount format', async () => {
-        const invalidAmounts = ['', 'abc', '12.5', '-100', '12abc', ' 123', '123 '];
-        for (const invalidAmount of invalidAmounts) {
+      describe('Token0 amount validation', () => {
+        it('should throw error for missing token0Amount', async () => {
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, token1Amount: invalidAmount })
-          ).rejects.toThrow('Token1 amount must be a positive numeric string');
-        }
-      });
-    });
-
-    describe('Provider validation', () => {
-      it('should throw error for missing provider', async () => {
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, provider: null })
-        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, provider: undefined })
-        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
-      });
-
-      it('should throw error for invalid provider', async () => {
-        const invalidProviders = [{}, [], 'provider', 123, true];
-        for (const invalidProvider of invalidProviders) {
+            adapter.generateAddLiquidityData({ ...baseParams, token0Amount: null })
+          ).rejects.toThrow('Token0 amount is required');
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, provider: invalidProvider })
+            adapter.generateAddLiquidityData({ ...baseParams, token0Amount: undefined })
+          ).rejects.toThrow('Token0 amount is required');
+        });
+
+        it('should throw error for non-string token0Amount', async () => {
+          const invalidTypes = [123, true, false, {}, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, token0Amount: invalidType })
+            ).rejects.toThrow('Token0 amount must be a string');
+          }
+        });
+
+        it('should throw error for invalid token0Amount format', async () => {
+          const invalidAmounts = ['', 'abc', '12.5', '-100', '12abc', ' 123', '123 '];
+          for (const invalidAmount of invalidAmounts) {
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, token0Amount: invalidAmount })
+            ).rejects.toThrow('Token0 amount must be a positive numeric string');
+          }
+        });
+
+        it('should throw error when both token amounts are zero', async () => {
+          await expect(
+            adapter.generateAddLiquidityData({ ...baseParams, token0Amount: '0', token1Amount: '0' })
+          ).rejects.toThrow('At least one token amount must be greater than 0');
+        });
+      });
+
+      describe('Token1 amount validation', () => {
+        it('should throw error for missing token1Amount', async () => {
+          await expect(
+            adapter.generateAddLiquidityData({ ...baseParams, token1Amount: null })
+          ).rejects.toThrow('Token1 amount is required');
+          await expect(
+            adapter.generateAddLiquidityData({ ...baseParams, token1Amount: undefined })
+          ).rejects.toThrow('Token1 amount is required');
+        });
+
+        it('should throw error for non-string token1Amount', async () => {
+          const invalidTypes = [123, true, false, {}, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, token1Amount: invalidType })
+            ).rejects.toThrow('Token1 amount must be a string');
+          }
+        });
+
+        it('should throw error for invalid token1Amount format', async () => {
+          const invalidAmounts = ['', 'abc', '12.5', '-100', '12abc', ' 123', '123 '];
+          for (const invalidAmount of invalidAmounts) {
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, token1Amount: invalidAmount })
+            ).rejects.toThrow('Token1 amount must be a positive numeric string');
+          }
+        });
+      });
+
+      describe('Provider validation', () => {
+        it('should throw error for missing provider', async () => {
+          await expect(
+            adapter.generateAddLiquidityData({ ...baseParams, provider: null })
           ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
-        }
-      });
-    });
-
-
-    describe('Pool data validation', () => {
-      it('should throw error for missing pool data', async () => {
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, poolData: null })
-        ).rejects.toThrow('Pool data parameter is required');
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, poolData: undefined })
-        ).rejects.toThrow('Pool data parameter is required');
-      });
-
-      it('should throw error for non-object pool data', async () => {
-        const invalidTypes = ['string', 123, true, []];
-        for (const invalidType of invalidTypes) {
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, poolData: invalidType })
-          ).rejects.toThrow('Pool data must be an object');
-        }
-      });
-    });
+            adapter.generateAddLiquidityData({ ...baseParams, provider: undefined })
+          ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
+        });
 
-    describe('Token data validation', () => {
-      it('should throw error for missing token data', async () => {
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, token0Data: null })
-        ).rejects.toThrow('Token0 data parameter is required');
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, token1Data: null })
-        ).rejects.toThrow('Token1 data parameter is required');
+        it('should throw error for invalid provider', async () => {
+          const invalidProviders = [{}, [], 'provider', 123, true];
+          for (const invalidProvider of invalidProviders) {
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, provider: invalidProvider })
+            ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
+          }
+        });
       });
 
-      it('should throw error for non-object token data', async () => {
-        const invalidTypes = ['string', 123, true, []];
-        for (const invalidType of invalidTypes) {
+      describe('Pool data validation', () => {
+        it('should throw error for missing pool data', async () => {
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, token0Data: invalidType })
-          ).rejects.toThrow('Token0 data must be an object');
+            adapter.generateAddLiquidityData({ ...baseParams, poolData: null })
+          ).rejects.toThrow('Pool data parameter is required');
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, token1Data: invalidType })
-          ).rejects.toThrow('Token1 data must be an object');
-        }
+            adapter.generateAddLiquidityData({ ...baseParams, poolData: undefined })
+          ).rejects.toThrow('Pool data parameter is required');
+        });
+
+        it('should throw error for non-object pool data', async () => {
+          const invalidTypes = ['string', 123, true, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, poolData: invalidType })
+            ).rejects.toThrow('Pool data must be an object');
+          }
+        });
       });
 
-      it('should throw error for missing token decimals', async () => {
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, token0Data: { address: env.usdcAddress } })
-        ).rejects.toThrow('Token0 decimals is required');
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, token1Data: { address: env.wethAddress } })
-        ).rejects.toThrow('Token1 decimals is required');
-      });
-
-      it('should throw error for invalid token decimals', async () => {
-        const invalidDecimals = ['6', true, false, {}, [], -1, 256, NaN, Infinity];
-        for (const invalidDecimal of invalidDecimals) {
+      describe('Token data validation', () => {
+        it('should throw error for missing token data', async () => {
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, token0Data: { ...baseParams.token0Data, decimals: invalidDecimal } })
-          ).rejects.toThrow('Token0 decimals must be a finite number between 0 and 255');
-        }
-      });
-    });
-
-    describe('Slippage tolerance validation', () => {
-      it('should throw error for missing slippage tolerance', async () => {
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, slippageTolerance: null })
-        ).rejects.toThrow('Slippage tolerance is required');
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, slippageTolerance: undefined })
-        ).rejects.toThrow('Slippage tolerance is required');
-      });
-
-      it('should throw error for non-finite slippage tolerance', async () => {
-        const invalidValues = ['0.5', true, false, {}, [], NaN, Infinity, -Infinity];
-        for (const invalidValue of invalidValues) {
+            adapter.generateAddLiquidityData({ ...baseParams, token0Data: null })
+          ).rejects.toThrow('Token0 data parameter is required');
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, slippageTolerance: invalidValue })
-          ).rejects.toThrow('Slippage tolerance must be a finite number');
-        }
-      });
+            adapter.generateAddLiquidityData({ ...baseParams, token1Data: null })
+          ).rejects.toThrow('Token1 data parameter is required');
+        });
 
-      it('should throw error for out-of-range slippage tolerance', async () => {
-        const invalidValues = [-1, -0.1, 101, 150];
-        for (const invalidValue of invalidValues) {
+        it('should throw error for non-object token data', async () => {
+          const invalidTypes = ['string', 123, true, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, token0Data: invalidType })
+            ).rejects.toThrow('Token0 data must be an object');
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, token1Data: invalidType })
+            ).rejects.toThrow('Token1 data must be an object');
+          }
+        });
+
+        it('should throw error for missing token decimals', async () => {
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, slippageTolerance: invalidValue })
-          ).rejects.toThrow('Slippage tolerance must be between 0 and 100');
-        }
-      });
-    });
-
-    describe('Deadline validation', () => {
-      it('should throw error for missing deadline', async () => {
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, deadlineMinutes: null })
-        ).rejects.toThrow('Deadline minutes is required');
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, deadlineMinutes: undefined })
-        ).rejects.toThrow('Deadline minutes is required');
-      });
-
-      it('should throw error for non-finite deadline', async () => {
-        const invalidValues = ['30', true, false, {}, [], NaN, Infinity, -Infinity];
-        for (const invalidValue of invalidValues) {
+            adapter.generateAddLiquidityData({ ...baseParams, token0Data: { address: env.usdcAddress } })
+          ).rejects.toThrow('Token0 decimals is required');
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, deadlineMinutes: invalidValue })
-          ).rejects.toThrow('Deadline minutes must be a finite number');
-        }
+            adapter.generateAddLiquidityData({ ...baseParams, token1Data: { address: env.wethAddress } })
+          ).rejects.toThrow('Token1 decimals is required');
+        });
+
+        it('should throw error for invalid token decimals', async () => {
+          const invalidDecimals = ['6', true, false, {}, [], -1, 256, NaN, Infinity];
+          for (const invalidDecimal of invalidDecimals) {
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, token0Data: { ...baseParams.token0Data, decimals: invalidDecimal } })
+            ).rejects.toThrow('Token0 decimals must be a finite number between 0 and 255');
+          }
+        });
       });
 
-      it('should throw error for negative deadline', async () => {
-        const invalidValues = [-1, -0.1];
-        for (const invalidValue of invalidValues) {
+      describe('Slippage tolerance validation', () => {
+        it('should throw error for missing slippage tolerance', async () => {
           await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, deadlineMinutes: invalidValue })
-          ).rejects.toThrow('Deadline minutes must be greater than 0');
-        }
+            adapter.generateAddLiquidityData({ ...baseParams, slippageTolerance: null })
+          ).rejects.toThrow('Slippage tolerance is required');
+          await expect(
+            adapter.generateAddLiquidityData({ ...baseParams, slippageTolerance: undefined })
+          ).rejects.toThrow('Slippage tolerance is required');
+        });
+
+        it('should throw error for non-finite slippage tolerance', async () => {
+          const invalidValues = ['0.5', true, false, {}, [], NaN, Infinity, -Infinity];
+          for (const invalidValue of invalidValues) {
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, slippageTolerance: invalidValue })
+            ).rejects.toThrow('Slippage tolerance must be a finite number');
+          }
+        });
+
+        it('should throw error for out-of-range slippage tolerance', async () => {
+          const invalidValues = [-1, -0.1, 101, 150];
+          for (const invalidValue of invalidValues) {
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, slippageTolerance: invalidValue })
+            ).rejects.toThrow('Slippage tolerance must be between 0 and 100');
+          }
+        });
       });
-    });
+
+      describe('Deadline validation', () => {
+        it('should throw error for missing deadline', async () => {
+          await expect(
+            adapter.generateAddLiquidityData({ ...baseParams, deadlineMinutes: null })
+          ).rejects.toThrow('Deadline minutes is required');
+          await expect(
+            adapter.generateAddLiquidityData({ ...baseParams, deadlineMinutes: undefined })
+          ).rejects.toThrow('Deadline minutes is required');
+        });
+
+        it('should throw error for non-finite deadline', async () => {
+          const invalidValues = ['30', true, false, {}, [], NaN, Infinity, -Infinity];
+          for (const invalidValue of invalidValues) {
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, deadlineMinutes: invalidValue })
+            ).rejects.toThrow('Deadline minutes must be a finite number');
+          }
+        });
+
+        it('should throw error for negative deadline', async () => {
+          const invalidValues = [-1, -0.1];
+          for (const invalidValue of invalidValues) {
+            await expect(
+              adapter.generateAddLiquidityData({ ...baseParams, deadlineMinutes: invalidValue })
+            ).rejects.toThrow('Deadline minutes must be greater than 0');
+          }
+        });
+      });
+
+      describe('Shape validation (consolidated)', () => {
+        let baseParams;
+
+        beforeEach(async () => {
+          const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+          baseParams = {
+            position: { id: env.testPosition.id, tickLower: env.testPosition.tickLower, tickUpper: env.testPosition.tickUpper },
+            token0Amount: ethers.utils.parseUnits('100', 6).toString(),
+            token1Amount: ethers.utils.parseUnits('0.1', 18).toString(),
+            provider: env.provider,
+            walletAddress: env.testVault.address,
+            poolData,
+            token0Data: { address: env.usdcAddress, decimals: 6 },
+            token1Data: { address: env.wethAddress, decimals: 18 },
+            slippageTolerance: 0.5,
+            deadlineMinutes: 30,
+          };
+        });
+
+        const call = (overrides) => adapter.generateAddLiquidityData({ ...baseParams, ...overrides });
+
+        it('rejects invalid poolData.fee shape variants', async () => {
+          await expect(call({ poolData: { ...baseParams.poolData, fee: null } }))
+            .rejects.toThrow('Pool data fee is required');
+          await expect(call({ poolData: { ...baseParams.poolData, fee: -1 } }))
+            .rejects.toThrow('Pool data fee must be a non-negative finite number');
+          await expect(call({ poolData: { ...baseParams.poolData, fee: Infinity } }))
+            .rejects.toThrow('Pool data fee must be a non-negative finite number');
+        });
+
+        it('rejects invalid poolData.sqrtPriceX96 shape variants', async () => {
+          await expect(call({ poolData: { ...baseParams.poolData, sqrtPriceX96: null } }))
+            .rejects.toThrow('Pool data sqrtPriceX96 is required');
+          await expect(call({ poolData: { ...baseParams.poolData, sqrtPriceX96: 12345 } }))
+            .rejects.toThrow('Pool data sqrtPriceX96 must be a string');
+          await expect(call({ poolData: { ...baseParams.poolData, sqrtPriceX96: 'abc' } }))
+            .rejects.toThrow('Pool data sqrtPriceX96 must be a positive numeric string');
+        });
+
+        it('rejects invalid poolData.liquidity shape variants', async () => {
+          await expect(call({ poolData: { ...baseParams.poolData, liquidity: null } }))
+            .rejects.toThrow('Pool data liquidity is required');
+          await expect(call({ poolData: { ...baseParams.poolData, liquidity: 12345 } }))
+            .rejects.toThrow('Pool data liquidity must be a string');
+          await expect(call({ poolData: { ...baseParams.poolData, liquidity: 'abc' } }))
+            .rejects.toThrow('Pool data liquidity must be a positive numeric string');
+        });
+
+        it('rejects invalid poolData.tick shape variants', async () => {
+          await expect(call({ poolData: { ...baseParams.poolData, tick: null } }))
+            .rejects.toThrow('Pool data tick is required');
+          await expect(call({ poolData: { ...baseParams.poolData, tick: NaN } }))
+            .rejects.toThrow('Pool data tick must be a finite number');
+        });
+
+        it('rejects invalid token address/decimal shape variants', async () => {
+          await expect(call({ token0Data: { ...baseParams.token0Data, address: '' } }))
+            .rejects.toThrow('Token0 address is required');
+          await expect(call({ token0Data: { ...baseParams.token0Data, address: null } }))
+            .rejects.toThrow('Token0 address is required');
+          await expect(call({ token0Data: { ...baseParams.token0Data, address: 12345 } }))
+            .rejects.toThrow('Token0 address must be a string');
+          await expect(call({ token0Data: { ...baseParams.token0Data, address: 'not-an-address' } }))
+            .rejects.toThrow('Invalid token0 address');
+          await expect(call({ token1Data: { ...baseParams.token1Data, address: '' } }))
+            .rejects.toThrow('Token1 address is required');
+          await expect(call({ token1Data: { ...baseParams.token1Data, address: 12345 } }))
+            .rejects.toThrow('Token1 address must be a string');
+          await expect(call({ token1Data: { ...baseParams.token1Data, address: 'not-an-address' } }))
+            .rejects.toThrow('Invalid token1 address');
+          await expect(call({ token1Data: { ...baseParams.token1Data, decimals: 256 } }))
+            .rejects.toThrow('Token1 decimals must be a finite number between 0 and 255');
+          // Same-address check
+          await expect(call({ token1Data: { ...baseParams.token1Data, address: baseParams.token0Data.address } }))
+            .rejects.toThrow('Token0 and token1 addresses cannot be the same');
+        });
+
+        it('rejects invalid slippage and deadline shape variants', async () => {
+          await expect(call({ slippageTolerance: NaN }))
+            .rejects.toThrow('Slippage tolerance must be a finite number');
+          await expect(call({ deadlineMinutes: NaN }))
+            .rejects.toThrow('Deadline minutes must be a finite number');
+        });
+
+        it('wraps non-validation errors as "Failed to generate add liquidity data"', async () => {
+          // _getAddLiquidityQuote is called inside the try block — spy it to
+          // throw so the outer catch (4244-4247) logs + rewraps.
+          const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+          const quoteSpy = vi.spyOn(adapter, '_getAddLiquidityQuote')
+            .mockRejectedValueOnce(new Error('synthetic quote failure'));
+          try {
+            await expect(call({}))
+              .rejects.toThrow('Failed to generate add liquidity data: synthetic quote failure');
+          } finally {
+            quoteSpy.mockRestore();
+            errSpy.mockRestore();
+          }
+        });
+
+        it('throws when adapter lacks positionManagerAddress', async () => {
+          // Hits the no-PM guard at 4170-4172 inside the try block.
+          const brokenAdapter = new (class extends adapter.constructor {
+            constructor() {
+              super(1337);
+              this.addresses = { ...this.addresses, positionManagerAddress: null };
+            }
+          })();
+          await expect(brokenAdapter.generateAddLiquidityData(baseParams))
+            .rejects.toThrow('No position manager address found for chainId: 1337');
+        });
+      });
     });
   });
 
@@ -11683,6 +12598,105 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           }
         });
       });
+
+      describe('Shape validation (consolidated)', () => {
+        // Each assertion overrides one field of baseParams to trip a shape guard
+        // not covered by the individual tests above.
+        const call = (overrides) => adapter.generateCreatePositionData({ ...baseParams, ...overrides });
+
+        it('rejects invalid poolData.fee shape variants', async () => {
+          await expect(call({ poolData: { ...baseParams.poolData, fee: null } }))
+            .rejects.toThrow('Pool data fee is required');
+          await expect(call({ poolData: { ...baseParams.poolData, fee: -1 } }))
+            .rejects.toThrow('Pool data fee must be a non-negative finite number');
+          await expect(call({ poolData: { ...baseParams.poolData, fee: Infinity } }))
+            .rejects.toThrow('Pool data fee must be a non-negative finite number');
+        });
+
+        it('rejects invalid poolData.sqrtPriceX96 shape variants', async () => {
+          await expect(call({ poolData: { ...baseParams.poolData, sqrtPriceX96: null } }))
+            .rejects.toThrow('Pool data sqrtPriceX96 is required');
+          await expect(call({ poolData: { ...baseParams.poolData, sqrtPriceX96: 12345 } }))
+            .rejects.toThrow('Pool data sqrtPriceX96 must be a string');
+          await expect(call({ poolData: { ...baseParams.poolData, sqrtPriceX96: 'abc' } }))
+            .rejects.toThrow('Pool data sqrtPriceX96 must be a positive numeric string');
+        });
+
+        it('rejects invalid poolData.liquidity shape variants', async () => {
+          await expect(call({ poolData: { ...baseParams.poolData, liquidity: null } }))
+            .rejects.toThrow('Pool data liquidity is required');
+          await expect(call({ poolData: { ...baseParams.poolData, liquidity: 12345 } }))
+            .rejects.toThrow('Pool data liquidity must be a string');
+          await expect(call({ poolData: { ...baseParams.poolData, liquidity: 'abc' } }))
+            .rejects.toThrow('Pool data liquidity must be a positive numeric string');
+        });
+
+        it('rejects invalid poolData.tick shape variants', async () => {
+          await expect(call({ poolData: { ...baseParams.poolData, tick: null } }))
+            .rejects.toThrow('Pool data tick is required');
+          await expect(call({ poolData: { ...baseParams.poolData, tick: NaN } }))
+            .rejects.toThrow('Pool data tick must be a finite number');
+        });
+
+        it('rejects invalid token0Data and token1Data address shape variants', async () => {
+          await expect(call({ token0Data: { ...baseParams.token0Data, address: '' } }))
+            .rejects.toThrow('Token0 address is required');
+          await expect(call({ token0Data: { ...baseParams.token0Data, address: null } }))
+            .rejects.toThrow('Token0 address is required');
+          await expect(call({ token0Data: { ...baseParams.token0Data, address: 12345 } }))
+            .rejects.toThrow('Token0 address must be a string');
+          await expect(call({ token0Data: { ...baseParams.token0Data, address: 'not-an-address' } }))
+            .rejects.toThrow('Invalid token0 address');
+          await expect(call({ token1Data: { ...baseParams.token1Data, address: '' } }))
+            .rejects.toThrow('Token1 address is required');
+          await expect(call({ token1Data: { ...baseParams.token1Data, address: 12345 } }))
+            .rejects.toThrow('Token1 address must be a string');
+          await expect(call({ token1Data: { ...baseParams.token1Data, address: 'not-an-address' } }))
+            .rejects.toThrow('Invalid token1 address');
+          // Same token addresses
+          await expect(call({ token1Data: { ...baseParams.token1Data, address: baseParams.token0Data.address } }))
+            .rejects.toThrow('Token0 and token1 addresses cannot be the same');
+        });
+
+        it('rejects invalid decimals shape variants', async () => {
+          await expect(call({ token1Data: { ...baseParams.token1Data, decimals: 256 } }))
+            .rejects.toThrow('Token1 decimals must be a finite number between 0 and 255');
+        });
+
+        it('rejects invalid slippage and deadline shape variants', async () => {
+          await expect(call({ slippageTolerance: NaN }))
+            .rejects.toThrow('Slippage tolerance must be a finite number');
+          await expect(call({ deadlineMinutes: NaN }))
+            .rejects.toThrow('Deadline minutes must be a finite number');
+        });
+
+        it('wraps non-validation errors as "Failed to generate create position data"', async () => {
+          // _getAddLiquidityQuote is called inside the try block — spy it so the
+          // outer catch (5993-5996) logs + rewraps.
+          const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+          const quoteSpy = vi.spyOn(adapter, '_getAddLiquidityQuote')
+            .mockRejectedValueOnce(new Error('synthetic quote failure'));
+          try {
+            await expect(call({}))
+              .rejects.toThrow('Failed to generate create position data: synthetic quote failure');
+          } finally {
+            quoteSpy.mockRestore();
+            errSpy.mockRestore();
+          }
+        });
+
+        it('throws when adapter lacks positionManagerAddress', async () => {
+          // Hits the no-PM guard at 5914-5916 inside the try block.
+          const brokenAdapter = new (class extends adapter.constructor {
+            constructor() {
+              super(1337);
+              this.addresses = { ...this.addresses, positionManagerAddress: null };
+            }
+          })();
+          await expect(brokenAdapter.generateCreatePositionData(baseParams))
+            .rejects.toThrow('No position manager address found for chainId: 1337');
+        });
+      });
     });
   });
 
@@ -12015,6 +13029,38 @@ describe('UniswapV3Adapter - Unit Tests', () => {
             isAmountIn: true
           })
         ).rejects.toThrow(/No token found at address/);
+      });
+
+      describe('AlphaRouter null-route propagation', () => {
+        afterEach(() => {
+          vi.restoreAllMocks();
+        });
+
+        it('throws "No route found" when EXACT_INPUT router returns null', async () => {
+          // Hits 5003-5004: isAmountIn=true + alphaRouter.route returning null.
+          vi.spyOn(adapter.alphaRouter, 'route').mockResolvedValueOnce(null);
+          await expect(
+            adapter.getBestSwapQuote({
+              tokenInAddress: env.wethAddress,
+              tokenOutAddress: env.usdcAddress,
+              amount: ethers.utils.parseEther('1').toString(),
+              isAmountIn: true
+            })
+          ).rejects.toThrow(/No route found for token pair/);
+        });
+
+        it('throws "No route found" when EXACT_OUTPUT router returns null', async () => {
+          // Hits 4978-4979: isAmountIn=false + alphaRouter.route returning null.
+          vi.spyOn(adapter.alphaRouter, 'route').mockResolvedValueOnce(null);
+          await expect(
+            adapter.getBestSwapQuote({
+              tokenInAddress: env.wethAddress,
+              tokenOutAddress: env.usdcAddress,
+              amount: ethers.utils.parseUnits('2000', 6).toString(),
+              isAmountIn: false
+            })
+          ).rejects.toThrow(/No route found for token pair/);
+        });
       });
     });
 
@@ -12469,6 +13515,40 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           adapter._getSwapRoute({ ...baseParams, deadlineMinutes: -30 })
         ).rejects.toThrow('Deadline must be greater than 0');
       });
+
+      describe('AlphaRouter null-route propagation', () => {
+        afterEach(() => {
+          vi.restoreAllMocks();
+        });
+
+        it('throws "No route found" when EXACT_INPUT router returns null', async () => {
+          // Hits 5169-5170.
+          vi.spyOn(adapter.alphaRouter, 'route').mockResolvedValueOnce(null);
+          await expect(
+            adapter._getSwapRoute({
+              tokenInAddress: env.wethAddress,
+              tokenOutAddress: env.usdcAddress,
+              amount: ethers.utils.parseEther('1').toString(),
+              isAmountIn: true,
+              recipient: '0x1234567890123456789012345678901234567890'
+            })
+          ).rejects.toThrow(/No route found for token pair/);
+        });
+
+        it('throws "No route found" when EXACT_OUTPUT router returns null', async () => {
+          // Hits 5144-5145.
+          vi.spyOn(adapter.alphaRouter, 'route').mockResolvedValueOnce(null);
+          await expect(
+            adapter._getSwapRoute({
+              tokenInAddress: env.wethAddress,
+              tokenOutAddress: env.usdcAddress,
+              amount: ethers.utils.parseUnits('2000', 6).toString(),
+              isAmountIn: false,
+              recipient: '0x1234567890123456789012345678901234567890'
+            })
+          ).rejects.toThrow(/No route found for token pair/);
+        });
+      });
     });
   });
 
@@ -12844,6 +13924,83 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           adapter._generateAlphaSwapData({ ...baseParams, recipient: {} })
         ).rejects.toThrow('Recipient address parameter is required');
       });
+
+      describe('Shape validation (consolidated) — ERC20 path + infra', () => {
+        const baseParams = () => ({
+          route: createMockRoute(),
+          recipient: env.testVault.address,
+          tokenInAddress: env.usdcAddress,
+          amountIn: ethers.utils.parseUnits('100', 6).toString(),
+          permit2Signature: '0x' + 'ab'.repeat(65),
+          permit2Nonce: 0,
+          permit2Deadline: Math.floor(Date.now() / 1000) + 1800
+        });
+        const call = (overrides) => adapter._generateAlphaSwapData({ ...baseParams(), ...overrides });
+
+        it('throws when adapter has no universal router address', async () => {
+          // Hits 5227-5228.
+          const brokenAdapter = new (class extends adapter.constructor {
+            constructor() {
+              super(1337);
+              this.addresses = { ...this.addresses, universalRouterAddress: null };
+            }
+          })();
+          await expect(
+            brokenAdapter._generateAlphaSwapData(baseParams())
+          ).rejects.toThrow(`No Universal Router address found for chainId: 1337`);
+        });
+
+        it('rejects invalid tokenInAddress shape variants (ERC20 path)', async () => {
+          // Hits 5251-5252.
+          await expect(call({ tokenInAddress: null }))
+            .rejects.toThrow('TokenInAddress parameter is required');
+          await expect(call({ tokenInAddress: 123 }))
+            .rejects.toThrow('TokenInAddress parameter is required');
+          // Hits 5256-5257.
+          await expect(call({ tokenInAddress: 'not-an-address' }))
+            .rejects.toThrow(/Invalid tokenInAddress/);
+        });
+
+        it('rejects missing amountIn (ERC20 path)', async () => {
+          // Hits 5261-5262.
+          await expect(call({ amountIn: null }))
+            .rejects.toThrow('AmountIn parameter is required');
+          await expect(call({ amountIn: '' }))
+            .rejects.toThrow('AmountIn parameter is required');
+        });
+
+        it('rejects invalid permit2Signature shape variants', async () => {
+          // Hits 5266-5267.
+          await expect(call({ permit2Signature: null }))
+            .rejects.toThrow('permit2Signature parameter is required and must be a string');
+          await expect(call({ permit2Signature: 123 }))
+            .rejects.toThrow('permit2Signature parameter is required and must be a string');
+          await expect(call({ permit2Signature: {} }))
+            .rejects.toThrow('permit2Signature parameter is required and must be a string');
+        });
+
+        it('rejects invalid permit2Nonce shape variants', async () => {
+          // Hits 5269-5270.
+          await expect(call({ permit2Nonce: null }))
+            .rejects.toThrow('permit2Nonce parameter is required and must be a non-negative number');
+          await expect(call({ permit2Nonce: '0' }))
+            .rejects.toThrow('permit2Nonce parameter is required and must be a non-negative number');
+          await expect(call({ permit2Nonce: -1 }))
+            .rejects.toThrow('permit2Nonce parameter is required and must be a non-negative number');
+        });
+
+        it('rejects invalid permit2Deadline shape variants', async () => {
+          // Hits 5272-5273.
+          await expect(call({ permit2Deadline: null }))
+            .rejects.toThrow('permit2Deadline parameter is required and must be a positive number');
+          await expect(call({ permit2Deadline: '12345' }))
+            .rejects.toThrow('permit2Deadline parameter is required and must be a positive number');
+          await expect(call({ permit2Deadline: 0 }))
+            .rejects.toThrow('permit2Deadline parameter is required and must be a positive number');
+          await expect(call({ permit2Deadline: -100 }))
+            .rejects.toThrow('permit2Deadline parameter is required and must be a positive number');
+        });
+      });
     });
   });
 
@@ -13187,6 +14344,31 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         ).toThrow('Invalid fee tier: 999. Must be one of: 100, 500, 3000, 10000');
       });
 
+      it('should throw when computed tickLower falls below minTick', () => {
+        // currentTick near min with 1% lower offset (~100 ticks below) pushes
+        // tickLower past the platform minTick (-887272). Hits 786-787.
+        expect(() =>
+          adapter._calculateTickRangeFromPercentages(-887272, 1, 1, 100)
+        ).toThrow(/Invalid tickLower: .* Must be between -887272 and 887272/);
+      });
+
+      it('should throw when computed tickUpper exceeds maxTick', () => {
+        // currentTick near max with 1% upper offset pushes tickUpper past maxTick.
+        // Hits 789-790.
+        expect(() =>
+          adapter._calculateTickRangeFromPercentages(887272, 1, 1, 100)
+        ).toThrow(/Invalid tickUpper: .* Must be between -887272 and 887272/);
+      });
+
+      it('should throw when tick alignment collapses range to tickLower >= tickUpper', () => {
+        // Tiny percentages round to 0 offsets (ticksPerPercent=100 so 0.001*100=0.1
+        // which Math.round reduces to 0). With currentTick=0 and spacing=1, both
+        // aligned ticks land on 0, triggering the tickLower >= tickUpper guard.
+        // Hits 794-795.
+        expect(() =>
+          adapter._calculateTickRangeFromPercentages(0, 0.001, 0.001, 100)
+        ).toThrow(/Invalid tick range: tickLower \(0\) must be less than tickUpper \(0\)/);
+      });
     });
 
     describe('Tick Spacing Verification', () => {
@@ -14055,6 +15237,21 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(() => adapter.parseSwapReceipt({ logs: [] }, [{ tokenInAddress: '0x123' }]))
           .toThrow('Swap metadata must have tokenOutAddress');
       });
+
+      it('silently skips logs with matching swap topic but malformed data', async () => {
+        // V3 Swap topic forces the parseLog branch — malformed data makes decode
+        // throw, loop's catch at 3803-3805 silently continues.
+        const v3SwapTopic = ethers.utils.id(adapter._getSwapEventSignature());
+        const receipt = {
+          logs: [{ address: '0x0000000000000000000000000000000000000001', topics: [v3SwapTopic], data: '0x00', logIndex: 0 }]
+        };
+        // Must pass non-empty swapMetadata with valid token addresses so the loop
+        // at 3814+ runs; empty allSwapEvents → everything totals 0.
+        const result = adapter.parseSwapReceipt(receipt, [
+          { tokenInAddress: env.usdcAddress, tokenOutAddress: env.wethAddress }
+        ]);
+        expect(result).toBeDefined();
+      });
     });
   });
 
@@ -14190,6 +15387,50 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(() => adapter.parseIncreaseLiquidityReceipt(receipt))
           .toThrow('IncreaseLiquidity event not found in receipt');
       });
+
+      it('silently skips logs with matching IncreaseLiquidity topic but malformed data', () => {
+        // Matching topic forces parseLog; malformed data makes it throw, loop's
+        // catch at 3937-3939 silently continues → no event found → outer throws.
+        const increaseLiquidityTopic = adapter.positionManagerInterface.getEventTopic('IncreaseLiquidity');
+        const receipt = {
+          logs: [{ address: '0x0000000000000000000000000000000000000001', topics: [increaseLiquidityTopic], data: '0x00' }]
+        };
+        expect(() => adapter.parseIncreaseLiquidityReceipt(receipt))
+          .toThrow('IncreaseLiquidity event not found in receipt');
+      });
+    });
+  });
+
+  describe('_generateSwapTransaction shape validation', () => {
+    // The method is an internal helper reached from generate*/execute paths.
+    // These tests cover the short-circuit validation wall at the top of the
+    // method (5595-5603) without invoking AlphaRouter.
+    const baseParams = () => ({
+      tokenIn: { symbol: 'USDC', address: env.usdcAddress, decimals: 6, isNative: false },
+      tokenOut: { symbol: 'WETH', address: env.wethAddress, decimals: 18, isNative: false },
+      amount: ethers.utils.parseUnits('100', 6).toString(),
+      isAmountIn: true,
+      signer: env.signers[0],
+      provider: env.provider,
+      chainId: 1337,
+      recipient: '0x1234567890123456789012345678901234567890',
+      slippageTolerance: 0.5
+    });
+    const call = (overrides) => adapter._generateSwapTransaction({ ...baseParams(), ...overrides });
+
+    it('rejects missing tokenIn or tokenIn without symbol', async () => {
+      await expect(call({ tokenIn: null })).rejects.toThrow('tokenIn with symbol is required');
+      await expect(call({ tokenIn: {} })).rejects.toThrow('tokenIn with symbol is required');
+    });
+
+    it('rejects missing tokenOut or tokenOut without symbol', async () => {
+      await expect(call({ tokenOut: null })).rejects.toThrow('tokenOut with symbol is required');
+      await expect(call({ tokenOut: {} })).rejects.toThrow('tokenOut with symbol is required');
+    });
+
+    it('rejects missing amount', async () => {
+      await expect(call({ amount: null })).rejects.toThrow('amount is required');
+      await expect(call({ amount: '' })).rejects.toThrow('amount is required');
     });
   });
 });

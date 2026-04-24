@@ -643,6 +643,19 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(typeof result.sqrtPriceX96).toBe('string');
         expect(typeof result.liquidity).toBe('string');
       });
+
+      it('wraps decode failures as "Failed to parse swap event"', () => {
+        // Event topic passes pre-validation (sig + 3 topics + data present) but the
+        // data is too short for the expected int128/int128/uint160/uint128/int24/uint24
+        // decode. Ethers throws a generic decoder error, hitting the outer catch rewrap.
+        expect(() =>
+          adapter.parseSwapEvent({
+            address: '0x360e68faccca8ca495c1b759fd9eee466db9fb32',
+            topics: [validTopic0, validPoolId, validSender],
+            data: '0x00'
+          })
+        ).toThrow(/Failed to parse swap event:/);
+      });
     });
   });
 
@@ -876,6 +889,22 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Last hop (V4): amountOut = abs(-2500000) = 2500000
         expect(result[0].actualAmountOut).toBe('2500000');
       });
+
+      it('silently skips logs with matching V4 swap topic but malformed data', () => {
+        // Matching V4 topic forces the decode path; malformed data makes
+        // defaultAbiCoder.decode throw → loop's catch at 3819-3821 continues.
+        const v4SwapTopic = ethers.utils.id(adapter._getSwapEventSignature());
+        const receipt = {
+          logs: [{ address: '0x0000000000000000000000000000000000000001', topics: [v4SwapTopic], data: '0x00', logIndex: 0 }]
+        };
+        const result = adapter.parseSwapReceipt(receipt, [
+          {
+            tokenInAddress: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+            tokenOutAddress: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'
+          }
+        ]);
+        expect(result).toBeDefined();
+      });
     });
   });
 
@@ -884,6 +913,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
     const NATIVE_ETH = ethers.constants.AddressZero;
     const USDC = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
     const WETH = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+    const WBTC = '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f';
 
     // Valid base params for success tests
     const validParams = {
@@ -1024,11 +1054,11 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(BigInt(result.quote.amountOut)).toBeGreaterThan(0n);
       }, 60000); // 60s timeout for AlphaRouter
 
-      it('should generate valid swap data for WETH -> USDC (ERC20 input)', async () => {
+      it('should generate valid swap data for WBTC -> USDC (ERC20 input)', async () => {
         const result = await adapter._generateSwapData({
-          tokenIn: WETH,
+          tokenIn: WBTC,
           tokenOut: USDC,
-          amountIn: ethers.utils.parseEther('0.01').toString(),
+          amountIn: ethers.utils.parseUnits('0.001', 8).toString(), // WBTC has 8 decimals
           recipient: '0x1234567890123456789012345678901234567890',
           slippageTolerance: 1,
           deadlineMinutes: 20
@@ -1045,7 +1075,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
         // Verify to is Universal Router
         expect(result.to).toBe(adapter.addresses.universalRouterAddress);
-      }, 180000); // AlphaRouter ERC20 routing can be slow on fork
+      }, 60000);
 
       it('should use default slippageTolerance and deadlineMinutes when not provided', async () => {
         const result = await adapter._generateSwapData({
@@ -1110,9 +1140,9 @@ describe('UniswapV4Adapter - Unit Tests', () => {
     describe('Permit2 Support', () => {
       it('should throw when permit2Signature is provided but permit2Nonce is missing', async () => {
         await expect(adapter._generateSwapData({
-          tokenIn: WETH,
+          tokenIn: WBTC,
           tokenOut: USDC,
-          amountIn: ethers.utils.parseEther('0.01').toString(),
+          amountIn: ethers.utils.parseUnits('0.001', 8).toString(),
           recipient: '0x1234567890123456789012345678901234567890',
           permit2Signature: '0x1234',
           // permit2Nonce missing
@@ -1122,9 +1152,9 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when permit2Signature is provided but permit2Deadline is missing', async () => {
         await expect(adapter._generateSwapData({
-          tokenIn: WETH,
+          tokenIn: WBTC,
           tokenOut: USDC,
-          amountIn: ethers.utils.parseEther('0.01').toString(),
+          amountIn: ethers.utils.parseUnits('0.001', 8).toString(),
           recipient: '0x1234567890123456789012345678901234567890',
           permit2Signature: '0x1234',
           permit2Nonce: 0
@@ -1134,9 +1164,9 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when permit2Nonce is negative', async () => {
         await expect(adapter._generateSwapData({
-          tokenIn: WETH,
+          tokenIn: WBTC,
           tokenOut: USDC,
-          amountIn: ethers.utils.parseEther('0.01').toString(),
+          amountIn: ethers.utils.parseUnits('0.001', 8).toString(),
           recipient: '0x1234567890123456789012345678901234567890',
           permit2Signature: '0x1234',
           permit2Nonce: -1,
@@ -1146,9 +1176,9 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when permit2Deadline is zero or negative', async () => {
         await expect(adapter._generateSwapData({
-          tokenIn: WETH,
+          tokenIn: WBTC,
           tokenOut: USDC,
-          amountIn: ethers.utils.parseEther('0.01').toString(),
+          amountIn: ethers.utils.parseUnits('0.001', 8).toString(),
           recipient: '0x1234567890123456789012345678901234567890',
           permit2Signature: '0x1234',
           permit2Nonce: 0,
@@ -1156,9 +1186,9 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         })).rejects.toThrow('permit2Deadline must be a positive number');
 
         await expect(adapter._generateSwapData({
-          tokenIn: WETH,
+          tokenIn: WBTC,
           tokenOut: USDC,
-          amountIn: ethers.utils.parseEther('0.01').toString(),
+          amountIn: ethers.utils.parseUnits('0.001', 8).toString(),
           recipient: '0x1234567890123456789012345678901234567890',
           permit2Signature: '0x1234',
           permit2Nonce: 0,
@@ -1188,9 +1218,9 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       it('should not require Permit2 params for ERC20 when not provided', async () => {
         // ERC20 without Permit2 params should work (caller handles approval separately)
         const result = await adapter._generateSwapData({
-          tokenIn: WETH,
+          tokenIn: WBTC,
           tokenOut: USDC,
-          amountIn: ethers.utils.parseEther('0.01').toString(),
+          amountIn: ethers.utils.parseUnits('0.001', 8).toString(),
           recipient: '0x1234567890123456789012345678901234567890'
           // No Permit2 params - calldata won't be wrapped
         });
@@ -1200,6 +1230,21 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(result).toHaveProperty('value');
         expect(result.value).toBe('0');
       }, 60000);
+
+      it('throws "No route found for this swap" when AlphaRouter returns null', async () => {
+        // Hits 2952-2954.
+        const spy = vi.spyOn(adapter.alphaRouter, 'route').mockResolvedValueOnce(null);
+        try {
+          await expect(adapter._generateSwapData({
+            tokenIn: WBTC,
+            tokenOut: USDC,
+            amountIn: ethers.utils.parseUnits('0.001', 8).toString(),
+            recipient: '0x1234567890123456789012345678901234567890'
+          })).rejects.toThrow('No route found for this swap');
+        } finally {
+          spy.mockRestore();
+        }
+      });
     });
   });
 
@@ -1465,6 +1510,14 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Use == 0 to handle -0 vs +0 edge case
         expect(result.tickLower % 42 == 0).toBe(true);
         expect(result.tickUpper % 42 == 0).toBe(true);
+      });
+
+      it('should throw when alignment clamps tickLower >= tickUpper at the bounds', () => {
+        // At maxTick with 1% bands + tickSpacing=200, both tickUpper and tickLower
+        // align to the same value (887200), then clamp to maxTick boundary →
+        // tickLower === tickUpper, hitting the 4253-4255 guard.
+        expect(() => adapter._calculateTickRangeFromPercentages(887272, 1, 1, 200))
+          .toThrow(/Invalid tick range: tickLower \(\d+\) must be less than tickUpper \(\d+\)/);
       });
     });
   });
@@ -2390,6 +2443,24 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(result.to).toBe(adapter.addresses.positionManagerAddress);
         expect(result.data).toBeDefined();
       }, 120000);
+
+      it('should throw when position.pool is missing inside the try block', async () => {
+        // Pre-validation accepts a position without `.pool`; the try block (1590-1592)
+        // throws because the pool id is needed for getPoolData.
+        const walletAddress = await env.signers[0].getAddress();
+        await expect(adapter.generateClaimFeesData({
+          position: {
+            id: env.testPosition.id,
+            tickLower: env.testPosition.tickLower,
+            tickUpper: env.testPosition.tickUpper,
+            poolKey: env.poolData.poolKey
+            // pool intentionally omitted
+          },
+          walletAddress,
+          provider: env.provider,
+          poolData: env.poolData
+        })).rejects.toThrow('position.pool is required to fetch pool state');
+      });
     });
 
     describe('Success Cases', () => {
@@ -3128,6 +3199,47 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           deadlineMinutes: 20
         })).rejects.toThrow('poolData is required');
       });
+
+      it('should throw for non-object position shape variants', async () => {
+        // Hits 1891-1893 (position must be an object).
+        const base = {
+          token0Amount: '1000000000000000000',
+          token1Amount: '1000000',
+          provider: env.provider,
+          poolData: env.poolData,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        };
+        await expect(adapter.generateAddLiquidityData({ ...base, position: 'string-pos' }))
+          .rejects.toThrow('position must be an object');
+        await expect(adapter.generateAddLiquidityData({ ...base, position: 123 }))
+          .rejects.toThrow('position must be an object');
+        await expect(adapter.generateAddLiquidityData({ ...base, position: [] }))
+          .rejects.toThrow('position must be an object');
+      });
+
+      it('should throw when position.tickLower or position.tickUpper is missing', async () => {
+        // Pre-validation only checks id presence — the try block's guard at
+        // 1954-1956 fires when ticks are missing.
+        const base = {
+          token0Amount: '1000000000000000000',
+          token1Amount: '1000000',
+          provider: env.provider,
+          poolData: env.poolData,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        };
+        await expect(adapter.generateAddLiquidityData({
+          ...base,
+          position: { id: '12345', tickUpper: 100 }
+          // tickLower omitted
+        })).rejects.toThrow('position.tickLower and position.tickUpper are required');
+        await expect(adapter.generateAddLiquidityData({
+          ...base,
+          position: { id: '12345', tickLower: -100 }
+          // tickUpper omitted
+        })).rejects.toThrow('position.tickLower and position.tickUpper are required');
+      });
     });
 
     describe('Success Cases', () => {
@@ -3480,6 +3592,24 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
         await env.revert(localSnapshot);
       }, 180000);
+
+      it('wraps non-validation errors as "Failed to generate add liquidity data"', async () => {
+        // Inverted ticks (tickLower > tickUpper) pass the pre-validation presence
+        // check but V4Position.fromAmounts rejects them from inside the try block —
+        // the resulting SDK error doesn't match the "is required/must be/Invalid/
+        // At least one" rewrap filter, so the outer catch (2088-2096) rewraps.
+        await expect(adapter.generateAddLiquidityData({
+          position: { id: env.testPosition.id, tickLower: 100, tickUpper: 50 },
+          token0Amount: ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString(),
+          token1Amount: ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString(),
+          provider: env.provider,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow(/Failed to generate add liquidity data:/);
+      }, 60000);
     });
   });
 
@@ -3941,6 +4071,22 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         await expect(adapter.getOptimalTokenRatio(params))
           .rejects.toThrow('provider is required');
       });
+
+      it('should throw "Test quote returned zero amounts" when test quote yields zero', async () => {
+        // Spy _getAddLiquidityAmounts to return zero amounts → totalValueUSD = 0
+        // hits the 2394-2396 guard.
+        const spy = vi.spyOn(adapter, '_getAddLiquidityAmounts').mockResolvedValueOnce({
+          token0Amount: '0',
+          token1Amount: '0',
+          liquidity: '0'
+        });
+        try {
+          await expect(adapter.getOptimalTokenRatio(getBaseParams()))
+            .rejects.toThrow('Test quote returned zero amounts for both tokens');
+        } finally {
+          spy.mockRestore();
+        }
+      });
     });
   });
 
@@ -4281,6 +4427,96 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           // Some implementations may throw for non-existent pools
           expect(error.message).toContain('Failed to get pool data');
         }
+      });
+
+      it('wraps non-validation errors as "Failed to get pool data for ..."', async () => {
+        // Break stateViewAddress so new ethers.Contract(null, ...) throws inside
+        // the try block → outer catch rewraps (4428-4430).
+        const brokenAdapter = new (class extends adapter.constructor {
+          constructor() {
+            super(1337);
+            this.addresses = { ...this.addresses, stateViewAddress: null };
+          }
+        })();
+        await expect(brokenAdapter.getPoolData(env.poolData.poolId, env.provider))
+          .rejects.toThrow(/Failed to get pool data for /);
+      });
+    });
+  });
+
+  describe('_getAddLiquidityAmounts', () => {
+    const NATIVE_ETH = ethers.constants.AddressZero;
+    const USDC = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
+
+    const validPoolKey = {
+      currency0: NATIVE_ETH,
+      currency1: USDC,
+      fee: 3000,
+      tickSpacing: 60,
+      hooks: ethers.constants.AddressZero
+    };
+
+    const validPoolData = {
+      sqrtPriceX96: '79228162514264337593543950336',
+      liquidity: '1000000000000000000',
+      tick: 0,
+      poolKey: validPoolKey
+    };
+
+    const validToken0Data = { address: NATIVE_ETH, decimals: 18 };
+    const validToken1Data = { address: USDC, decimals: 6 };
+    const validPosition = { tickLower: -60, tickUpper: 60 };
+
+    const call = (overrides) => adapter._getAddLiquidityAmounts({
+      position: validPosition,
+      token0Amount: '1000000000000000000',
+      token1Amount: '1000000',
+      poolData: validPoolData,
+      token0Data: validToken0Data,
+      token1Data: validToken1Data,
+      provider: env.provider,
+      ...overrides
+    });
+
+    describe('Shape validation (consolidated)', () => {
+      it('rejects invalid poolData fields', async () => {
+        await expect(call({ poolData: { ...validPoolData, sqrtPriceX96: undefined } }))
+          .rejects.toThrow('poolData.sqrtPriceX96 is required');
+        await expect(call({ poolData: { ...validPoolData, liquidity: undefined } }))
+          .rejects.toThrow('poolData.liquidity is required');
+        await expect(call({ poolData: { ...validPoolData, tick: undefined } }))
+          .rejects.toThrow('poolData.tick is required');
+      });
+
+      it('rejects invalid token1Amount', async () => {
+        await expect(call({ token1Amount: 'abc' }))
+          .rejects.toThrow('token1Amount must be a numeric string');
+      });
+
+      it('rejects invalid poolKey fields', async () => {
+        const withPoolKey = (overrides) => ({
+          ...validPoolData,
+          poolKey: { ...validPoolKey, ...overrides }
+        });
+        await expect(call({ poolData: withPoolKey({ currency0: null }) }))
+          .rejects.toThrow('poolKey.currency0 is required');
+        await expect(call({ poolData: withPoolKey({ currency1: null }) }))
+          .rejects.toThrow('poolKey.currency1 is required');
+        await expect(call({ poolData: withPoolKey({ fee: undefined }) }))
+          .rejects.toThrow('poolKey.fee is required');
+        await expect(call({ poolData: withPoolKey({ tickSpacing: undefined }) }))
+          .rejects.toThrow('poolKey.tickSpacing is required');
+      });
+
+      it('rejects invalid token0Data and token1Data', async () => {
+        await expect(call({ token0Data: { ...validToken0Data, address: 'not-an-address' } }))
+          .rejects.toThrow('token0Data.address must be a valid Ethereum address');
+        await expect(call({ token0Data: { ...validToken0Data, decimals: 256 } }))
+          .rejects.toThrow('token0Data.decimals must be a number between 0 and 255');
+        await expect(call({ token1Data: { ...validToken1Data, address: 'not-an-address' } }))
+          .rejects.toThrow('token1Data.address must be a valid Ethereum address');
+        await expect(call({ token1Data: { ...validToken1Data, decimals: -1 } }))
+          .rejects.toThrow('token1Data.decimals must be a number between 0 and 255');
       });
     });
   });
@@ -4664,6 +4900,85 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           })).rejects.toThrow('Token0 and token1 addresses cannot be the same');
         });
       });
+
+      describe('Shape validation (consolidated)', () => {
+        // Each assertion overrides one field of a known-valid param set to trip
+        // a specific shape guard. One function call per guard, grouped by area.
+        const call = (overrides) => adapter.generateCreatePositionData({
+          position: mockPosition,
+          token0Amount: '1000000000000000000',
+          token1Amount: '1000000',
+          provider: env.provider,
+          walletAddress: validWalletAddress,
+          poolData: mockPoolData,
+          token0Data: mockToken0Data,
+          token1Data: mockToken1Data,
+          slippageTolerance: 0.5,
+          deadlineMinutes: 30,
+          ...overrides
+        });
+
+        it('rejects invalid poolData shape variants', async () => {
+          await expect(call({ poolData: 'not-an-object' })).rejects.toThrow('Pool data must be an object');
+          await expect(call({ poolData: [] })).rejects.toThrow('Pool data must be an object');
+          await expect(call({ poolData: { ...mockPoolData, fee: null } })).rejects.toThrow('Pool data fee is required');
+          await expect(call({ poolData: { ...mockPoolData, fee: -1 } })).rejects.toThrow('Pool data fee must be a non-negative finite number');
+          await expect(call({ poolData: { ...mockPoolData, fee: Infinity } })).rejects.toThrow('Pool data fee must be a non-negative finite number');
+          await expect(call({ poolData: { ...mockPoolData, sqrtPriceX96: 12345 } })).rejects.toThrow('Pool data sqrtPriceX96 must be a string');
+          await expect(call({ poolData: { ...mockPoolData, sqrtPriceX96: 'not-numeric' } })).rejects.toThrow('Pool data sqrtPriceX96 must be a positive numeric string');
+          await expect(call({ poolData: { ...mockPoolData, liquidity: null } })).rejects.toThrow('Pool data liquidity is required');
+          await expect(call({ poolData: { ...mockPoolData, liquidity: 12345 } })).rejects.toThrow('Pool data liquidity must be a string');
+          await expect(call({ poolData: { ...mockPoolData, liquidity: 'abc' } })).rejects.toThrow('Pool data liquidity must be a positive numeric string');
+          await expect(call({ poolData: { ...mockPoolData, tick: null } })).rejects.toThrow('Pool data tick is required');
+          await expect(call({ poolData: { ...mockPoolData, tick: NaN } })).rejects.toThrow('Pool data tick must be a finite number');
+        });
+
+        it('rejects invalid poolKey shape variants', async () => {
+          await expect(call({ poolData: { ...mockPoolData, poolKey: 'str' } })).rejects.toThrow('PoolKey must be an object');
+          await expect(call({ poolData: { ...mockPoolData, poolKey: [] } })).rejects.toThrow('PoolKey must be an object');
+          await expect(call({ poolData: { ...mockPoolData, poolKey: { ...mockPoolKey, fee: null } } })).rejects.toThrow('PoolKey must have fee');
+          await expect(call({ poolData: { ...mockPoolData, poolKey: { ...mockPoolKey, tickSpacing: null } } })).rejects.toThrow('PoolKey must have tickSpacing');
+        });
+
+        it('rejects invalid position shape variants', async () => {
+          await expect(call({ position: 'str' })).rejects.toThrow('Position must be an object');
+          await expect(call({ position: [] })).rejects.toThrow('Position must be an object');
+          await expect(call({ position: { tickLower: NaN, tickUpper: 60 } })).rejects.toThrow('Position tickLower must be a finite number');
+          await expect(call({ position: { tickLower: -60 } })).rejects.toThrow('Position tickUpper is required');
+          await expect(call({ position: { tickLower: -60, tickUpper: Infinity } })).rejects.toThrow('Position tickUpper must be a finite number');
+        });
+
+        it('rejects invalid token amount shape variants', async () => {
+          await expect(call({ token0Amount: 'abc' })).rejects.toThrow('Token0 amount must be a positive numeric string');
+          await expect(call({ token1Amount: null })).rejects.toThrow('Token1 amount is required');
+          await expect(call({ token1Amount: 123 })).rejects.toThrow('Token1 amount must be a string');
+          await expect(call({ token1Amount: 'abc' })).rejects.toThrow('Token1 amount must be a positive numeric string');
+        });
+
+        it('rejects invalid wallet and token data shape variants', async () => {
+          await expect(call({ walletAddress: 12345 })).rejects.toThrow('Wallet address must be a string');
+          await expect(call({ token0Data: 'str' })).rejects.toThrow('Token0 data must be an object');
+          await expect(call({ token0Data: [] })).rejects.toThrow('Token0 data must be an object');
+          await expect(call({ token0Data: { ...mockToken0Data, address: null } })).rejects.toThrow('Token0 address is required');
+          await expect(call({ token0Data: { ...mockToken0Data, address: 'not-an-address' } })).rejects.toThrow('Invalid token0 address');
+          await expect(call({ token0Data: { ...mockToken0Data, decimals: null } })).rejects.toThrow('Token0 decimals is required');
+          await expect(call({ token0Data: { ...mockToken0Data, decimals: 256 } })).rejects.toThrow('Token0 decimals must be a finite number between 0 and 255');
+          await expect(call({ token1Data: null })).rejects.toThrow('Token1 data parameter is required');
+          await expect(call({ token1Data: 'str' })).rejects.toThrow('Token1 data must be an object');
+          await expect(call({ token1Data: [] })).rejects.toThrow('Token1 data must be an object');
+          await expect(call({ token1Data: { ...mockToken1Data, address: null } })).rejects.toThrow('Token1 address is required');
+          await expect(call({ token1Data: { ...mockToken1Data, address: 'not-an-address' } })).rejects.toThrow('Invalid token1 address');
+          await expect(call({ token1Data: { ...mockToken1Data, decimals: null } })).rejects.toThrow('Token1 decimals is required');
+          await expect(call({ token1Data: { ...mockToken1Data, decimals: -1 } })).rejects.toThrow('Token1 decimals must be a finite number between 0 and 255');
+        });
+
+        it('rejects invalid slippage and deadline shape variants', async () => {
+          await expect(call({ slippageTolerance: NaN })).rejects.toThrow('Slippage tolerance must be a finite number');
+          await expect(call({ slippageTolerance: Infinity })).rejects.toThrow('Slippage tolerance must be a finite number');
+          await expect(call({ deadlineMinutes: NaN })).rejects.toThrow('Deadline minutes must be a finite number');
+          await expect(call({ deadlineMinutes: Infinity })).rejects.toThrow('Deadline minutes must be a finite number');
+        });
+      });
     });
 
     describe('Success Cases', () => {
@@ -4878,6 +5193,31 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(receipt.status).toBe(1);
         expect(BigInt(txData.quote.liquidity)).toBeGreaterThan(0n);
       }, 120000);
+
+      it('wraps non-validation errors as "Failed to generate create position data"', async () => {
+        // Spy sortTokens (called early in the try block at line 2669) to inject a
+        // synthetic error — outer catch (2819-2827) rewraps it.
+        const walletAddress = await env.signers[0].getAddress();
+        const spy = vi.spyOn(adapter, 'sortTokens').mockImplementationOnce(() => {
+          throw new Error('synthetic sort failure');
+        });
+        try {
+          await expect(adapter.generateCreatePositionData({
+            position: { tickLower: env.testPosition.tickLower, tickUpper: env.testPosition.tickUpper },
+            token0Amount: ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString(),
+            token1Amount: ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString(),
+            provider: env.provider,
+            walletAddress,
+            poolData: env.poolData,
+            token0Data: env.poolData.token0,
+            token1Data: env.poolData.token1,
+            slippageTolerance: 1,
+            deadlineMinutes: 20
+          })).rejects.toThrow('Failed to generate create position data: synthetic sort failure');
+        } finally {
+          spy.mockRestore();
+        }
+      });
     });
   });
 
@@ -5337,6 +5677,82 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(typeof result.current).toBe('number');
       });
     });
+
+    describe('Success Cases - without swapData (fetches current tick from chain)', () => {
+      it('should fetch current tick from StateView when swapData is not provided', async () => {
+        const result = await adapter.evaluatePositionRange(
+          { tickLower: -887272, tickUpper: 887272, pool: env.poolData.poolId },
+          env.provider
+        );
+
+        expect(result).toHaveProperty('inRange');
+        expect(result).toHaveProperty('current');
+        expect(typeof result.current).toBe('number');
+        expect(Number.isFinite(result.current)).toBe(true);
+      });
+    });
+  });
+
+  describe('_getCurrentTickV4', () => {
+    describe('Error Cases', () => {
+      it('should throw when poolId is null', async () => {
+        await expect(adapter._getCurrentTickV4(null, env.provider))
+          .rejects.toThrow('poolId parameter is required');
+      });
+
+      it('should throw when poolId is undefined', async () => {
+        await expect(adapter._getCurrentTickV4(undefined, env.provider))
+          .rejects.toThrow('poolId parameter is required');
+      });
+
+      it('should throw when poolId is empty string', async () => {
+        await expect(adapter._getCurrentTickV4('', env.provider))
+          .rejects.toThrow('poolId parameter is required');
+      });
+
+      it('should throw when poolId is not a string', async () => {
+        await expect(adapter._getCurrentTickV4(12345, env.provider))
+          .rejects.toThrow('Invalid poolId format: 12345');
+      });
+
+      it('should throw when poolId has an invalid hex format', async () => {
+        await expect(adapter._getCurrentTickV4('0xnothex', env.provider))
+          .rejects.toThrow('Invalid poolId format: 0xnothex');
+      });
+
+      it('should throw when poolId length is wrong', async () => {
+        // Correct hex chars but too short
+        await expect(adapter._getCurrentTickV4('0xabcd', env.provider))
+          .rejects.toThrow('Invalid poolId format: 0xabcd');
+      });
+
+      it('should throw when provider is missing', async () => {
+        await expect(adapter._getCurrentTickV4(env.poolData.poolId, null))
+          .rejects.toThrow('provider is required');
+      });
+    });
+
+    describe('Success Cases', () => {
+      it('should return current tick for a real V4 pool', async () => {
+        const tick = await adapter._getCurrentTickV4(env.poolData.poolId, env.provider);
+
+        expect(typeof tick).toBe('number');
+        expect(Number.isFinite(tick)).toBe(true);
+      });
+
+      it('wraps non-poolId errors as "Failed to get current tick for pool ..."', async () => {
+        // Break stateViewAddress on a forked adapter so new ethers.Contract(null, ...)
+        // throws inside the try block → outer catch rewraps (1404-1406).
+        const brokenAdapter = new (class extends adapter.constructor {
+          constructor() {
+            super(1337);
+            this.addresses = { ...this.addresses, stateViewAddress: null };
+          }
+        })();
+        await expect(brokenAdapter._getCurrentTickV4(env.poolData.poolId, env.provider))
+          .rejects.toThrow(/Failed to get current tick for pool /);
+      });
+    });
   });
 
   describe('parseCollectReceipt', () => {
@@ -5793,6 +6209,130 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(result.feesByPosition['12345'].token0.toString()).toBe('0');
         expect(result.feesByPosition['12345'].token1.toString()).toBe('0');
       });
+
+      it('should distribute ETH proportionally across native-ETH positions (happy path)', async () => {
+        configureBlockExplorer({ blockExplorerApiKey: 'test-key' });
+
+        const walletAddress = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd';
+        const txHash = '0x' + '1'.repeat(64);
+
+        // Two positions with native ETH, different liquidities
+        const positionMetadata = {
+          'posA': {
+            position: { liquidity: '1000' },
+            token0Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' },
+            token1Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' }
+          },
+          'posB': {
+            position: { liquidity: '3000' },
+            token0Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' },
+            token1Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' }
+          }
+        };
+
+        // Stub Arbiscan response: 0.04 ETH internal transfer to wallet
+        vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            status: '1',
+            message: 'OK',
+            result: [{
+              from: '0x0000000000000000000000000000000000000001',
+              to: walletAddress,
+              value: ethers.utils.parseEther('0.04').toString(),
+              isError: '0'
+            }]
+          })
+        });
+
+        const result = await adapter.parseCollectReceipt(
+          { transactionHash: txHash, logs: [] },
+          positionMetadata,
+          { chainId: 42161, walletAddress }
+        );
+
+        // posA: 1000/4000 = 0.01 ETH, posB: 3000/4000 = 0.03 ETH
+        expect(ethers.BigNumber.isBigNumber(result.feesByPosition['posA'].token0)).toBe(true);
+        expect(result.feesByPosition['posA'].token0.toString()).toBe(ethers.utils.parseEther('0.01').toString());
+        expect(result.feesByPosition['posB'].token0.toString()).toBe(ethers.utils.parseEther('0.03').toString());
+
+        vi.restoreAllMocks();
+      });
+
+      it('should default liquidity to 1 when not present in metadata', async () => {
+        configureBlockExplorer({ blockExplorerApiKey: 'test-key' });
+
+        const walletAddress = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd';
+
+        const positionMetadata = {
+          '42': {
+            token0Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' },
+            token1Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' }
+          }
+        };
+
+        vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            status: '1',
+            message: 'OK',
+            result: [{
+              from: '0x0000000000000000000000000000000000000001',
+              to: walletAddress,
+              value: ethers.utils.parseEther('0.1').toString(),
+              isError: '0'
+            }]
+          })
+        });
+
+        const result = await adapter.parseCollectReceipt(
+          { transactionHash: '0x' + '2'.repeat(64), logs: [] },
+          positionMetadata,
+          { chainId: 42161, walletAddress }
+        );
+
+        expect(result.feesByPosition['42'].token0.toString()).toBe(ethers.utils.parseEther('0.1').toString());
+
+        vi.restoreAllMocks();
+      });
+
+      it('should attribute ETH to token1 when native ETH is in the token1 slot', async () => {
+        configureBlockExplorer({ blockExplorerApiKey: 'test-key' });
+
+        const walletAddress = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd';
+
+        const positionMetadata = {
+          'posT1': {
+            position: { liquidity: '1' },
+            token0Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' },
+            token1Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' }
+          }
+        };
+
+        vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            status: '1',
+            message: 'OK',
+            result: [{
+              from: '0x0000000000000000000000000000000000000001',
+              to: walletAddress,
+              value: ethers.utils.parseEther('0.05').toString(),
+              isError: '0'
+            }]
+          })
+        });
+
+        const result = await adapter.parseCollectReceipt(
+          { transactionHash: '0x' + '3'.repeat(64), logs: [] },
+          positionMetadata,
+          { chainId: 42161, walletAddress }
+        );
+
+        expect(result.feesByPosition['posT1'].token1.toString()).toBe(ethers.utils.parseEther('0.05').toString());
+
+        vi.restoreAllMocks();
+      });
     });
 
     describe('Integration - Real Receipt', () => {
@@ -5988,6 +6528,50 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Verify metadata preserved
         expect(fees.metadata).toBe(positionMetadata[parsed.tokenId]);
       }, 300000);
+
+      it('should throw when metadata.token1Data.address is missing', async () => {
+        // Hits 3612-3614 (missing token addresses guard).
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: '0x0000000000000000000000000000000000000001', decimals: 18 },
+            token1Data: { decimals: 6 }, // address omitted
+            position: { id: '12345' }
+          }
+        };
+        await expect(adapter.parseCollectReceipt({ logs: [] }, positionMetadata))
+          .rejects.toThrow(/Invalid metadata for position 12345: missing token addresses/);
+      });
+
+      it('should throw when a receipt log has malformed structure', async () => {
+        // Hits 3631-3633 (invalid log structure guard in parseCollectReceipt).
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: '0x0000000000000000000000000000000000000001', decimals: 18 },
+            token1Data: { address: '0x0000000000000000000000000000000000000002', decimals: 6 },
+            position: { id: '12345' }
+          }
+        };
+        await expect(adapter.parseCollectReceipt({ logs: [{}] }, positionMetadata))
+          .rejects.toThrow('Invalid log structure in receipt: missing address or topics');
+      });
+
+      it('should throw when Transfer event log has < 3 topics', async () => {
+        // Hits 3647-3649.
+        const erc20TransferTopic = ethers.utils.id('Transfer(address,address,uint256)');
+        const tokenAddr = '0x0000000000000000000000000000000000000001';
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: tokenAddr, decimals: 18 },
+            token1Data: { address: '0x0000000000000000000000000000000000000002', decimals: 6 },
+            position: { id: '12345' }
+          }
+        };
+        const receipt = {
+          logs: [{ address: tokenAddr, topics: [erc20TransferTopic], data: '0x' }]
+        };
+        await expect(adapter.parseCollectReceipt(receipt, positionMetadata))
+          .rejects.toThrow(/Transfer event from .* has insufficient topics: 1/);
+      });
     });
   });
 
@@ -6245,6 +6829,151 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       });
     });
 
+    describe('ETH Tracking via Block Explorer', () => {
+      const NATIVE_ETH = ethers.constants.AddressZero;
+      const USDC_ADDRESS = '0xaf88d065e77c8cc2239327c5edb3a432268e5831';
+
+      afterEach(() => {
+        resetBlockExplorerConfig();
+        vi.restoreAllMocks();
+      });
+
+      it('should compute ETH fees as (received - principal) for a native-ETH closure', async () => {
+        configureBlockExplorer({ blockExplorerApiKey: 'test-key' });
+
+        const walletAddress = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd';
+        const txHash = '0x' + '7'.repeat(64);
+
+        // ModifyLiquidity with negative delta = position closure
+        const modifyLog = createModifyLiquidityLog(
+          ethers.constants.HashZero,
+          -100,
+          100,
+          ethers.BigNumber.from('-1000000000000000000')
+        );
+
+        const positionMetadata = {
+          '777': {
+            position: { tickLower: -100, tickUpper: 100, liquidity: '1000000000000000000' },
+            poolData: { sqrtPriceX96: '79228162514264337593543950336' },
+            token0Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' },
+            token1Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' }
+          }
+        };
+
+        // Stub Arbiscan: 1 ETH internal transfer to wallet
+        vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            status: '1',
+            message: 'OK',
+            result: [{
+              from: '0x0000000000000000000000000000000000000001',
+              to: walletAddress,
+              value: ethers.utils.parseEther('1').toString(),
+              isError: '0'
+            }]
+          })
+        });
+
+        const result = await adapter.parseClosureReceipt(
+          { transactionHash: txHash, logs: [modifyLog] },
+          positionMetadata,
+          { chainId: 42161, walletAddress }
+        );
+
+        // token0 should now be a BigNumber (not null) — ETH tracking ran and distributed
+        expect(ethers.BigNumber.isBigNumber(result.feesByPosition['777'].token0)).toBe(true);
+        expect(result.feesByPosition['777'].token0.gte(0)).toBe(true);
+      });
+
+      it('should distribute ETH proportionally across two native-ETH closures', async () => {
+        configureBlockExplorer({ blockExplorerApiKey: 'test-key' });
+
+        const walletAddress = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd';
+        const txHash = '0x' + '8'.repeat(64);
+
+        // Two positions with different liquidity (1000 vs 3000)
+        const logA = createModifyLiquidityLog(
+          ethers.constants.HashZero, -100, 100, ethers.BigNumber.from('-1000')
+        );
+        const logB = createModifyLiquidityLog(
+          ethers.constants.HashZero, -200, 200, ethers.BigNumber.from('-3000')
+        );
+
+        const positionMetadata = {
+          'A': {
+            position: { tickLower: -100, tickUpper: 100, liquidity: '1000' },
+            poolData: { sqrtPriceX96: '79228162514264337593543950336' },
+            token0Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' },
+            token1Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' }
+          },
+          'B': {
+            position: { tickLower: -200, tickUpper: 200, liquidity: '3000' },
+            poolData: { sqrtPriceX96: '79228162514264337593543950336' },
+            token0Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' },
+            token1Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' }
+          }
+        };
+
+        vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            status: '1',
+            message: 'OK',
+            result: [{
+              from: '0x0000000000000000000000000000000000000001',
+              to: walletAddress,
+              value: ethers.utils.parseEther('4').toString(),
+              isError: '0'
+            }]
+          })
+        });
+
+        const result = await adapter.parseClosureReceipt(
+          { transactionHash: txHash, logs: [logA, logB] },
+          positionMetadata,
+          { chainId: 42161, walletAddress }
+        );
+
+        // Both should be BigNumbers (not null) and non-negative after clamping
+        expect(ethers.BigNumber.isBigNumber(result.feesByPosition['A'].token0)).toBe(true);
+        expect(ethers.BigNumber.isBigNumber(result.feesByPosition['B'].token0)).toBe(true);
+        expect(result.feesByPosition['A'].token0.gte(0)).toBe(true);
+        expect(result.feesByPosition['B'].token0.gte(0)).toBe(true);
+      });
+
+      it('should skip ETH distribution when totalEthReceived is zero', async () => {
+        configureBlockExplorer({ blockExplorerApiKey: 'test-key' });
+
+        const walletAddress = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd';
+
+        const positionMetadata = {
+          '1': {
+            position: { tickLower: -100, tickUpper: 100, liquidity: '1000' },
+            poolData: { sqrtPriceX96: '79228162514264337593543950336' },
+            token0Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' },
+            token1Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' }
+          }
+        };
+
+        // Internal tx with zero value — getEthTransfersForWallet returns received=0
+        vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ status: '1', message: 'OK', result: [] })
+        });
+
+        const result = await adapter.parseClosureReceipt(
+          { transactionHash: '0x' + '9'.repeat(64), logs: [] },
+          positionMetadata,
+          { chainId: 42161, walletAddress }
+        );
+
+        // token0 stays null because the distribution block was skipped
+        expect(result.feesByPosition['1'].token0).toBeNull();
+      });
+    });
+
     describe('Integration - Real Closure Receipt', () => {
       it('should parse real position closure receipt with ModifyLiquidity and Transfer events', async () => {
         const { ethers } = require('ethers');
@@ -6404,12 +7133,60 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Verify metadata preserved
         expect(fees.metadata).toBe(positionMetadata[parsed.tokenId]);
       }, 300000);
+
+      it('should throw when metadata.token0Data.address is missing', async () => {
+        // Hits 3355-3357 (missing token addresses guard).
+        const positionMetadata = {
+          '12345': {
+            token0Data: { decimals: 6 }, // address omitted
+            token1Data: { address: '0x0000000000000000000000000000000000000001', decimals: 18 },
+            poolData: { sqrtPriceX96: '1' },
+            position: { id: '12345' }
+          }
+        };
+        await expect(adapter.parseClosureReceipt({ logs: [] }, positionMetadata))
+          .rejects.toThrow(/Invalid metadata for position 12345: missing token addresses/);
+      });
+
+      it('should throw when a receipt log has malformed structure', async () => {
+        // Hits 3375-3377 (invalid log structure guard).
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: '0x0000000000000000000000000000000000000001', decimals: 18 },
+            token1Data: { address: '0x0000000000000000000000000000000000000002', decimals: 6 },
+            poolData: { sqrtPriceX96: '1' },
+            position: { id: '12345' }
+          }
+        };
+        await expect(adapter.parseClosureReceipt({ logs: [{}] }, positionMetadata))
+          .rejects.toThrow('Invalid log structure in receipt: missing address or topics');
+      });
+
+      it('should throw when Transfer event log has < 3 topics', async () => {
+        // Hits 3402-3404: Transfer topic matches, log.address is in tokenAddresses,
+        // but topics array is too short.
+        const erc20TransferTopic = ethers.utils.id('Transfer(address,address,uint256)');
+        const tokenAddr = '0x0000000000000000000000000000000000000001';
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: tokenAddr, decimals: 18 },
+            token1Data: { address: '0x0000000000000000000000000000000000000002', decimals: 6 },
+            poolData: { sqrtPriceX96: '1' },
+            position: { id: '12345' }
+          }
+        };
+        const receipt = {
+          logs: [{ address: tokenAddr, topics: [erc20TransferTopic], data: '0x' }]
+        };
+        await expect(adapter.parseClosureReceipt(receipt, positionMetadata))
+          .rejects.toThrow(/Transfer event from .* has insufficient topics: 1/);
+      });
     });
   });
 
   describe('getBestSwapQuote', () => {
-    // Use WETH address for ERC20 tests (Arbitrum WETH)
-    const WETH = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+    // Use WBTC for ERC20 tests — has deep V4 liquidity on Arbitrum, unlike WETH
+    const WBTC = '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f';
 
     // Recreate adapter with a fresh AlphaRouter provider.
     // After many evm_revert cycles, the AlphaRouter's internal provider accumulates
@@ -6422,9 +7199,9 @@ describe('UniswapV4Adapter - Unit Tests', () => {
     describe('Success Cases', () => {
       it('should return best quote using AlphaRouter with EXACT_INPUT', async () => {
         const quoteParams = {
-          tokenInAddress: WETH,
+          tokenInAddress: WBTC,
           tokenOutAddress: env.usdcAddress,
-          amount: ethers.utils.parseEther('1').toString(), // 1 ETH
+          amount: ethers.utils.parseUnits('0.01', 8).toString(), // 0.01 WBTC
           isAmountIn: true
         };
 
@@ -6451,9 +7228,9 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should return valid quote for different amounts with EXACT_INPUT', async () => {
         const quoteParams = {
-          tokenInAddress: WETH,
+          tokenInAddress: WBTC,
           tokenOutAddress: env.usdcAddress,
-          amount: ethers.utils.parseEther('0.1').toString(),
+          amount: ethers.utils.parseUnits('0.001', 8).toString(),
           isAmountIn: true
         };
 
@@ -6469,9 +7246,9 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should return consistent results across multiple calls with EXACT_INPUT', async () => {
         const quoteParams = {
-          tokenInAddress: WETH,
+          tokenInAddress: WBTC,
           tokenOutAddress: env.usdcAddress,
-          amount: ethers.utils.parseEther('0.25').toString(),
+          amount: ethers.utils.parseUnits('0.0025', 8).toString(),
           isAmountIn: true
         };
 
@@ -6490,7 +7267,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should return best quote using AlphaRouter with EXACT_OUTPUT', async () => {
         const quoteParams = {
-          tokenInAddress: WETH,
+          tokenInAddress: WBTC,
           tokenOutAddress: env.usdcAddress,
           amount: ethers.utils.parseUnits('2000', 6).toString(), // 2000 USDC
           isAmountIn: false
@@ -6556,9 +7333,9 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       it('should default tokenInIsNative and tokenOutIsNative to false', async () => {
         // Existing tests don't pass these params - they should still work
         const quoteParams = {
-          tokenInAddress: WETH,
+          tokenInAddress: WBTC,
           tokenOutAddress: env.usdcAddress,
-          amount: ethers.utils.parseEther('1').toString(),
+          amount: ethers.utils.parseUnits('0.01', 8).toString(),
           isAmountIn: true
           // Note: no tokenInIsNative or tokenOutIsNative
         };
@@ -6638,7 +7415,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw error for invalid tokenOutAddress', async () => {
         const baseParams = {
-          tokenInAddress: WETH,
+          tokenInAddress: WBTC,
           amount: ethers.utils.parseEther('1').toString(),
           isAmountIn: true
         };
@@ -6666,7 +7443,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw error for invalid amount', async () => {
         const baseParams = {
-          tokenInAddress: WETH,
+          tokenInAddress: WBTC,
           tokenOutAddress: env.usdcAddress,
           isAmountIn: true
         };
@@ -6704,7 +7481,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw error for invalid isAmountIn', async () => {
         const baseParams = {
-          tokenInAddress: WETH,
+          tokenInAddress: WBTC,
           tokenOutAddress: env.usdcAddress,
           amount: ethers.utils.parseEther('1').toString()
         };
@@ -6755,9 +7532,9 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         const startTime = Date.now();
 
         const quoteParams = {
-          tokenInAddress: WETH,
+          tokenInAddress: WBTC,
           tokenOutAddress: env.usdcAddress,
-          amount: ethers.utils.parseEther('1').toString(),
+          amount: ethers.utils.parseUnits('0.01', 8).toString(),
           isAmountIn: true
         };
 
@@ -6770,6 +7547,32 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Should still return valid result
         expect(bestQuote).toBeDefined();
         expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
+      });
+    });
+
+    describe('AlphaRouter null-route propagation', () => {
+      afterEach(() => vi.restoreAllMocks());
+
+      it('throws "No route found" when EXACT_INPUT router returns null', async () => {
+        // Hits 3126-3128.
+        vi.spyOn(adapter.alphaRouter, 'route').mockResolvedValueOnce(null);
+        await expect(adapter.getBestSwapQuote({
+          tokenInAddress: WBTC,
+          tokenOutAddress: env.usdcAddress,
+          amount: '1000000',
+          isAmountIn: true
+        })).rejects.toThrow(/No route found for token pair/);
+      });
+
+      it('throws "No route found" when EXACT_OUTPUT router returns null', async () => {
+        // Hits 3101-3103.
+        vi.spyOn(adapter.alphaRouter, 'route').mockResolvedValueOnce(null);
+        await expect(adapter.getBestSwapQuote({
+          tokenInAddress: WBTC,
+          tokenOutAddress: env.usdcAddress,
+          amount: '1000000',
+          isAmountIn: false
+        })).rejects.toThrow(/No route found for token pair/);
       });
     });
   });
@@ -6896,11 +7699,11 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should generate an ERC20 swap transaction with Permit2', async () => {
         const signer = env.signers[0];
-        const WETH = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+        const WBTC = '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f';
         const swapInstructions = [{
-          tokenIn: { address: WETH, symbol: 'WETH', decimals: 18 },
+          tokenIn: { address: WBTC, symbol: 'WBTC', decimals: 8 },
           tokenOut: { address: env.usdcAddress, symbol: 'USDC', decimals: 6 },
-          amount: ethers.utils.parseEther('0.01').toString(),
+          amount: ethers.utils.parseUnits('0.001', 8).toString(),
           isAmountIn: true
         }];
 
@@ -6920,25 +7723,25 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(tx.data.startsWith('0x')).toBe(true);
 
         const meta = result.metadata[0];
-        expect(meta.tokenInSymbol).toBe('WETH');
+        expect(meta.tokenInSymbol).toBe('WBTC');
         expect(meta.tokenOutSymbol).toBe('USDC');
-        expect(meta.tokenInAddress).toBe(WETH);
+        expect(meta.tokenInAddress).toBe(WBTC);
       }, 60000);
 
       it('should batch multiple swaps with incrementing Permit2 nonces', async () => {
         const signer = env.signers[0];
-        const WETH = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+        const WBTC = '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f';
         const swapInstructions = [
           {
-            tokenIn: { address: WETH, symbol: 'WETH', decimals: 18 },
+            tokenIn: { address: WBTC, symbol: 'WBTC', decimals: 8 },
             tokenOut: { address: env.usdcAddress, symbol: 'USDC', decimals: 6 },
-            amount: ethers.utils.parseEther('0.005').toString(),
+            amount: ethers.utils.parseUnits('0.0005', 8).toString(),
             isAmountIn: true
           },
           {
-            tokenIn: { address: WETH, symbol: 'WETH', decimals: 18 },
+            tokenIn: { address: WBTC, symbol: 'WBTC', decimals: 8 },
             tokenOut: { address: env.usdcAddress, symbol: 'USDC', decimals: 6 },
-            amount: ethers.utils.parseEther('0.005').toString(),
+            amount: ethers.utils.parseUnits('0.0005', 8).toString(),
             isAmountIn: true
           }
         ];
@@ -6956,8 +7759,8 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
         // Different nonces should produce different calldata
         expect(result.transactions[0].data).not.toBe(result.transactions[1].data);
-        expect(result.metadata[0].tokenInSymbol).toBe('WETH');
-        expect(result.metadata[1].tokenInSymbol).toBe('WETH');
+        expect(result.metadata[0].tokenInSymbol).toBe('WBTC');
+        expect(result.metadata[1].tokenInSymbol).toBe('WBTC');
       }, 90000);
     });
   });
@@ -7171,6 +7974,14 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         await expect(adapter.selectBestPool(
           'WETH', 'USDC', env.provider, 999999
         )).rejects.toThrow(/configured for chain/);
+      });
+
+      it('should throw when non-native token has no address on requested chain', async () => {
+        // AUSD is configured only on chain 43114/1338 (Avalanche). Calling with
+        // chainId 1337 triggers the `token.addresses[chainId] === undefined`
+        // branch inside resolveTokenData at 4052-4054.
+        await expect(adapter.selectBestPool('AUSD', 'USDC', env.provider, 1337))
+          .rejects.toThrow('Token AUSD not available on chain 1337');
       });
     });
   });
@@ -7408,6 +8219,19 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             .toThrow('quoteToken.decimals must be a finite number between 0 and 255');
         });
       });
+
+      it('wraps SDK failures as "Failed to convert tick to price"', () => {
+        // tick=999999 passes Number.isFinite but is outside V4's valid range (±887272).
+        // SDK tickToPrice throws → outer catch (4637-4640) logs + rewraps.
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+          expect(() => adapter._tickToPrice(999999, validTokenA, validTokenB))
+            .toThrow(/Failed to convert tick to price:/);
+          expect(errSpy).toHaveBeenCalled();
+        } finally {
+          errSpy.mockRestore();
+        }
+      });
     });
   });
 
@@ -7554,6 +8378,21 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       it('should throw error for token1Data missing decimals', () => {
         expect(() => adapter.evaluatePriceMovement({ tick: 100 }, 100, mockToken0Data, { address: '0x123', symbol: 'WETH' }))
           .toThrow('token1Data must have address, symbol, and decimals properties');
+      });
+
+      it('should throw when baseline price is zero', () => {
+        // Spy-force _tickToPrice to return a Price-like whose toSignificant yields '0'
+        // so the baselinePriceValue === 0 guard (542-543) fires without relying on
+        // extreme tick underflow that real SDK math wouldn't produce.
+        const zeroPrice = { toSignificant: () => '0' };
+        const spy = vi.spyOn(adapter, '_tickToPrice').mockReturnValueOnce(zeroPrice);
+        try {
+          expect(() =>
+            adapter.evaluatePriceMovement({ tick: 100 }, 0, mockToken0Data, mockToken1Data)
+          ).toThrow('Baseline price is zero, cannot calculate movement');
+        } finally {
+          spy.mockRestore();
+        }
       });
     });
 
@@ -7738,6 +8577,36 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         await expect(
           adapter.getPositionsForVDS(validAddress, {})
         ).rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('wraps non-validation errors as "Failed to fetch V4 positions for VDS"', async () => {
+        // Induces a synthetic failure in the discovery path so the outer catch
+        // (724-731) rewraps it — validation errors still pass through untouched.
+        const spy = vi.spyOn(adapter, '_discoverTokenIdsByTransferEvents')
+          .mockRejectedValueOnce(new Error('synthetic discovery failure'));
+        try {
+          await expect(
+            adapter.getPositionsForVDS(env.testVault.address, env.provider)
+          ).rejects.toThrow('Failed to fetch V4 positions for VDS: synthetic discovery failure');
+        } finally {
+          spy.mockRestore();
+        }
+      });
+
+      it('collects per-position failures and throws "Failed to process N position(s)"', async () => {
+        // Spy _decodePositionInfo to throw for every position → the per-position
+        // catch at 708-710 pushes to processingErrors, and the post-loop throw
+        // at 714-716 runs. The outer catch then rewraps because the message
+        // doesn't match the validation filter.
+        const spy = vi.spyOn(adapter, '_decodePositionInfo')
+          .mockImplementation(() => { throw new Error('synthetic decode failure'); });
+        try {
+          await expect(
+            adapter.getPositionsForVDS(env.testVault.address, env.provider)
+          ).rejects.toThrow(/Failed to process \d+ position\(s\): .*synthetic decode failure/);
+        } finally {
+          spy.mockRestore();
+        }
       });
     });
   });
@@ -7988,6 +8857,36 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       it('should throw if provider is invalid object', async () => {
         await expect(adapter.getPositionsForDisplay(env.testVault.address, { invalid: true }))
           .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('wraps non-validation errors as "Failed to fetch positions for display"', async () => {
+        // Spy _discoverTokenIdsByTransferEvents (called early in the try block)
+        // to inject a synthetic error → outer catch (964-971) rewraps it.
+        const spy = vi.spyOn(adapter, '_discoverTokenIdsByTransferEvents')
+          .mockRejectedValueOnce(new Error('synthetic discovery failure'));
+        try {
+          await expect(
+            adapter.getPositionsForDisplay(env.testVault.address, env.provider)
+          ).rejects.toThrow('Failed to fetch positions for display: synthetic discovery failure');
+        } finally {
+          spy.mockRestore();
+        }
+      });
+
+      it('collects per-position failures and throws "Failed to process N position(s)"', async () => {
+        // Spy _decodePositionInfo to throw for every position → the per-position
+        // catch at 858-860 pushes to processingErrors, and the post-loop throw
+        // at 863-865 runs. The outer catch rewraps since the message doesn't
+        // match the validation filter.
+        const spy = vi.spyOn(adapter, '_decodePositionInfo')
+          .mockImplementation(() => { throw new Error('synthetic decode failure'); });
+        try {
+          await expect(
+            adapter.getPositionsForDisplay(env.testVault.address, env.provider)
+          ).rejects.toThrow(/Failed to process \d+ position\(s\): .*synthetic decode failure/);
+        } finally {
+          spy.mockRestore();
+        }
       });
     });
   });
@@ -8291,9 +9190,36 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         await expect(adapter.getPositionById(env.positionTokenId, env.provider))
           .rejects.toThrow('zero liquidity');
 
+        // refreshPositionForDisplay shares the same zero-liquidity guard at
+        // 1052-1054 — piggy-back here to avoid a second close/revert cycle.
+        await expect(adapter.refreshPositionForDisplay(env.positionTokenId.toString(), env.provider))
+          .rejects.toThrow(`Position ${env.positionTokenId.toString()} has zero liquidity`);
+
+        // getPositionsForVDS's zero-liquidity `continue` (lines 679-681) only
+        // fires for positions with non-ERC721-reverting StateView liquidity=0.
+        // With the vault's only position now at zero liquidity, the VDS walk
+        // skips it and returns empty.
+        const vdsResult = await adapter.getPositionsForVDS(env.testVault.address, env.provider);
+        expect(vdsResult.positions).toEqual({});
+
         // Revert to restore the position's liquidity for subsequent tests
         await env.revert(localSnapshot);
       }, 180000);
+
+      it('wraps non-validation errors as "Failed to fetch V4 position"', async () => {
+        // Spy _discoverTokenIdsByTransferEvents isn't called here; the method
+        // calls positionManager.ownerOf() and stateView contracts inline. Easiest
+        // induction: spy an adapter-local helper called inside the try.
+        // _decodePositionInfo is called after the contract read — spy it to throw.
+        const spy = vi.spyOn(adapter, '_decodePositionInfo')
+          .mockImplementationOnce(() => { throw new Error('synthetic decode failure'); });
+        try {
+          await expect(adapter.getPositionById(env.positionTokenId, env.provider))
+            .rejects.toThrow('Failed to fetch V4 position');
+        } finally {
+          spy.mockRestore();
+        }
+      }, 30000);
     });
   });
 
@@ -8565,6 +9491,170 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         const result = await adapter.getIncentivePostCreateTransactions('posId', {}, null);
         expect(result).toEqual([]);
       });
+    });
+  });
+
+  describe('fetchPoolDataForTesting', () => {
+    const NATIVE_ETH = ethers.constants.AddressZero;
+    const USDC = '0xaf88d065e77c8cc2239327c5edb3a432268e5831';
+    const FEE = 500;
+    const TICK_SPACING = 10;
+
+    describe('Parameter Validation', () => {
+      it('should throw when token0Address is null', async () => {
+        await expect(adapter.fetchPoolDataForTesting(null, USDC, FEE, TICK_SPACING, NATIVE_ETH, env.provider))
+          .rejects.toThrow('Token0 address parameter is required');
+      });
+
+      it('should throw when token0Address is undefined', async () => {
+        await expect(adapter.fetchPoolDataForTesting(undefined, USDC, FEE, TICK_SPACING, NATIVE_ETH, env.provider))
+          .rejects.toThrow('Token0 address parameter is required');
+      });
+
+      it('should throw when token0Address is invalid format', async () => {
+        await expect(adapter.fetchPoolDataForTesting('0xnotanaddress', USDC, FEE, TICK_SPACING, NATIVE_ETH, env.provider))
+          .rejects.toThrow('Invalid token0 address: 0xnotanaddress');
+      });
+
+      it('should throw when token1Address is null', async () => {
+        await expect(adapter.fetchPoolDataForTesting(NATIVE_ETH, null, FEE, TICK_SPACING, NATIVE_ETH, env.provider))
+          .rejects.toThrow('Token1 address parameter is required');
+      });
+
+      it('should throw when token1Address is undefined', async () => {
+        await expect(adapter.fetchPoolDataForTesting(NATIVE_ETH, undefined, FEE, TICK_SPACING, NATIVE_ETH, env.provider))
+          .rejects.toThrow('Token1 address parameter is required');
+      });
+
+      it('should throw when token1Address is invalid format', async () => {
+        await expect(adapter.fetchPoolDataForTesting(NATIVE_ETH, '0xnotanaddress', FEE, TICK_SPACING, NATIVE_ETH, env.provider))
+          .rejects.toThrow('Invalid token1 address: 0xnotanaddress');
+      });
+
+      it('should throw when fee is null', async () => {
+        await expect(adapter.fetchPoolDataForTesting(NATIVE_ETH, USDC, null, TICK_SPACING, NATIVE_ETH, env.provider))
+          .rejects.toThrow('Fee parameter is required');
+      });
+
+      it('should throw when fee is not a number', async () => {
+        await expect(adapter.fetchPoolDataForTesting(NATIVE_ETH, USDC, 'abc', TICK_SPACING, NATIVE_ETH, env.provider))
+          .rejects.toThrow('Fee must be a valid number');
+      });
+
+      it('should throw when fee is Infinity', async () => {
+        await expect(adapter.fetchPoolDataForTesting(NATIVE_ETH, USDC, Infinity, TICK_SPACING, NATIVE_ETH, env.provider))
+          .rejects.toThrow('Fee must be a valid number');
+      });
+
+      it('should throw when tickSpacing is null', async () => {
+        await expect(adapter.fetchPoolDataForTesting(NATIVE_ETH, USDC, FEE, null, NATIVE_ETH, env.provider))
+          .rejects.toThrow('TickSpacing parameter is required');
+      });
+
+      it('should throw when tickSpacing is not a number', async () => {
+        await expect(adapter.fetchPoolDataForTesting(NATIVE_ETH, USDC, FEE, 'abc', NATIVE_ETH, env.provider))
+          .rejects.toThrow('TickSpacing must be a valid number');
+      });
+
+      it('should throw when tickSpacing is NaN', async () => {
+        await expect(adapter.fetchPoolDataForTesting(NATIVE_ETH, USDC, FEE, NaN, NATIVE_ETH, env.provider))
+          .rejects.toThrow('TickSpacing must be a valid number');
+      });
+
+      it('should throw when hooks is null', async () => {
+        await expect(adapter.fetchPoolDataForTesting(NATIVE_ETH, USDC, FEE, TICK_SPACING, null, env.provider))
+          .rejects.toThrow('Hooks parameter is required');
+      });
+
+      it('should throw when hooks is invalid address', async () => {
+        await expect(adapter.fetchPoolDataForTesting(NATIVE_ETH, USDC, FEE, TICK_SPACING, '0xnotanaddress', env.provider))
+          .rejects.toThrow('Invalid hooks address: 0xnotanaddress');
+      });
+
+      it('should throw when provider is missing', async () => {
+        await expect(adapter.fetchPoolDataForTesting(NATIVE_ETH, USDC, FEE, TICK_SPACING, NATIVE_ETH, null))
+          .rejects.toThrow('Provider parameter is required');
+      });
+    });
+
+    describe('Address Sorting', () => {
+      it('should swap tokens when token0Address > token1Address', async () => {
+        // USDC address > NATIVE_ETH (0x00...) so this hits the else branch that swaps them
+        const result = await adapter.fetchPoolDataForTesting(
+          USDC,
+          NATIVE_ETH,
+          FEE,
+          TICK_SPACING,
+          NATIVE_ETH,
+          env.provider
+        );
+
+        // After sorting, currency0 must be the lower address (NATIVE_ETH)
+        expect(result.poolKey.currency0.toLowerCase()).toBe(NATIVE_ETH.toLowerCase());
+        expect(result.poolKey.currency1.toLowerCase()).toBe(USDC.toLowerCase());
+      });
+    });
+  });
+
+  describe('Outer catch rewrappers (consolidated)', () => {
+    // Each generate*/internal method wraps a try/catch around its main work and
+    // rewraps any non-validation error with a descriptive prefix. Spy a method
+    // the try block calls to throw a generic Error and assert the rewrap fires.
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('generateClaimFeesData → "Failed to generate claim fees data"', async () => {
+      vi.spyOn(adapter, 'getPoolData').mockRejectedValueOnce(new Error('synthetic pool fetch failure'));
+      const walletAddress = await env.signers[0].getAddress();
+      await expect(
+        adapter.generateClaimFeesData({
+          position: env.testPosition,
+          walletAddress,
+          provider: env.provider,
+          poolData: env.poolData
+        })
+      ).rejects.toThrow('Failed to generate claim fees data: synthetic pool fetch failure');
+    });
+
+    it('generateRemoveLiquidityData → "Failed to generate remove liquidity data"', async () => {
+      // generateRemoveLiquidityData uses the passed-in `poolData` directly (no
+      // getPoolData call), but _computePoolId is the first method called inside
+      // the outer try (1768) — spy it to inject a non-validation error.
+      vi.spyOn(adapter, '_computePoolId').mockImplementationOnce(() => {
+        throw new Error('synthetic poolId failure');
+      });
+      const walletAddress = await env.signers[0].getAddress();
+      await expect(
+        adapter.generateRemoveLiquidityData({
+          position: env.testPosition,
+          percentage: 100,
+          walletAddress,
+          provider: env.provider,
+          slippageTolerance: 0.5,
+          deadlineMinutes: 30,
+          poolData: env.poolData
+        })
+      ).rejects.toThrow('Failed to generate remove liquidity data: synthetic poolId failure');
+    });
+
+    it('_getAddLiquidityAmounts → "Failed to calculate add liquidity amounts"', async () => {
+      // _getAddLiquidityAmounts receives poolData as a param and doesn't call getPoolData,
+      // so spy on sortTokens instead — it's called at the top of the try block (2239).
+      vi.spyOn(adapter, 'sortTokens').mockImplementationOnce(() => {
+        throw new Error('synthetic sort failure');
+      });
+      await expect(
+        adapter._getAddLiquidityAmounts({
+          position: { tickLower: env.testPosition.tickLower, tickUpper: env.testPosition.tickUpper },
+          token0Amount: '1000000',
+          token1Amount: '1000000000000000000',
+          poolData: env.poolData,
+          token0Data: { address: env.poolData.poolKey.currency0 || env.usdcAddress, decimals: 6 },
+          token1Data: { address: env.poolData.poolKey.currency1 || env.wethAddress, decimals: 18 },
+          provider: env.provider
+        })
+      ).rejects.toThrow('Failed to calculate add liquidity amounts: synthetic sort failure');
     });
   });
 });

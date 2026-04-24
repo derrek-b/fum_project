@@ -4,7 +4,7 @@
  * Comprehensive tests for all tokenHelper functions following established patterns
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import {
   getAllTokens,
   getTokenBySymbol,
@@ -273,6 +273,13 @@ describe('Token Helpers', () => {
       it('should throw error for token not on chain', () => {
         expect(() => getTokenAddress('USDC', 999999))
           .toThrow('Token USDC not available on chain 999999');
+      });
+
+      it('should throw error for native token whose wrappedAddresses lack the chainId', () => {
+        // ETH is native; wrappedAddresses only covers 42161 and 1337.
+        // Chain 999999 trips the "native + missing wrappedAddress" guard.
+        expect(() => getTokenAddress('ETH', 999999))
+          .toThrow('Token ETH not available on chain 999999');
       });
     });
   });
@@ -1354,5 +1361,63 @@ describe('Token Helpers', () => {
       expect(result.isNative).toBe(false);
       expect(result.name).toBe('Wrapped Avalanche');
     });
+  });
+});
+
+// Config-injection tests: defensive guards inside tokenHelpers fire only when a
+// configured token is missing fields that real config always sets. We inject a
+// synthetic tokens config to exercise those paths. Uses doMock + resetModules +
+// dynamic import because tokenHelpers is pre-loaded transitively by test/setup.js
+// via init → coingecko.
+describe('tokenHelpers — config-injection tests', () => {
+  let mockedTokenHelpers;
+
+  beforeAll(async () => {
+    vi.doMock('../../../src/configs/tokens.js', () => ({
+      default: {
+        // Real-shape token, used as a "happy" anchor so other lookups keep working.
+        USDC: {
+          name: 'USD Coin',
+          symbol: 'USDC',
+          decimals: 6,
+          coingeckoId: 'usd-coin',
+          addresses: { 42161: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' },
+          isStablecoin: true,
+        },
+        // Missing `addresses` property entirely → trips `getTokensByChain` filter guard.
+        BROKEN_NO_ADDRESSES: {
+          name: 'Broken',
+          symbol: 'BROKEN_NO_ADDRESSES',
+          decimals: 18,
+          coingeckoId: 'broken',
+          isStablecoin: false,
+        },
+        // Has addresses but no coingeckoId → trips `getCoingeckoId` guard.
+        BROKEN_NO_CGID: {
+          name: 'NoCGID',
+          symbol: 'BROKEN_NO_CGID',
+          decimals: 18,
+          addresses: { 42161: '0x0000000000000000000000000000000000000001' },
+          isStablecoin: false,
+        },
+      },
+    }));
+    vi.resetModules();
+    mockedTokenHelpers = await import('../../../src/helpers/tokenHelpers.js');
+  });
+
+  afterAll(() => {
+    vi.doUnmock('../../../src/configs/tokens.js');
+    vi.resetModules();
+  });
+
+  it('getTokensByChain throws when a configured token is missing the addresses property', () => {
+    expect(() => mockedTokenHelpers.getTokensByChain(42161))
+      .toThrow('Token BROKEN_NO_ADDRESSES is missing addresses property');
+  });
+
+  it('getCoingeckoId throws when a configured token has no coingeckoId', () => {
+    expect(() => mockedTokenHelpers.getCoingeckoId('BROKEN_NO_CGID'))
+      .toThrow('Token BROKEN_NO_CGID does not have a CoinGecko ID configured');
   });
 });

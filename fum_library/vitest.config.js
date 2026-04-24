@@ -1,8 +1,21 @@
 // vitest.config.js
-import { defineConfig } from 'vitest/config';
+import { defineConfig, coverageConfigDefaults } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    coverage: {
+      provider: 'v8',
+      exclude: [
+        ...coverageConfigDefaults.exclude,
+        // Barrel re-export files — no logic, just re-exports. Tests import
+        // directly from module files, so these would otherwise show as 0%.
+        'src/index.js',
+        'src/**/index.js',
+        // Hardhat configs — test infrastructure, not product code.
+        'hardhat.config.cjs',
+        'hardhat.*.config.cjs',
+      ],
+    },
     // Two projects: Arbitrum-forked tests and Avalanche-forked tests.
     // Each project gets its own module scope so TEST_CONFIG in hardhat-config.js
     // evaluates FORK_CHAIN correctly at import time.

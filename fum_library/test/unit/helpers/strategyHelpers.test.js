@@ -4,7 +4,7 @@
  * Tests for strategy configuration utilities and validation functions
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { ethers } from 'ethers';
 import {
   validateIdString,
@@ -1201,6 +1201,22 @@ describe('Strategy Helpers', () => {
         expect(result.errors.targetRangeUpper).toContain('must be at most');
         expect(result.errors.targetRangeLower).toContain('must be a number');
       });
+
+      it('returns error when decimal/percent/fiat-currency value has more than 2 decimal places', () => {
+        // bob's targetRangeUpper is a percent (type: 'percent', min 0.1, max 20) — 5.123
+        // is in range but has 3 decimal places, tripping the precision guard.
+        const params = {
+          targetRangeUpper: 5.123,
+          targetRangeLower: 2,
+          feeReinvestment: false,
+          reinvestmentRatio: 50,
+          maxSlippage: 1,
+          emergencyExitTrigger: 10,
+        };
+        const result = validateStrategyParams('bob', params);
+        expect(result.isValid).toBe(false);
+        expect(result.errors.targetRangeUpper).toContain('cannot have more than 2 decimal places');
+      });
     });
   });
 
@@ -1901,6 +1917,24 @@ describe('Strategy Helpers', () => {
       });
     });
 
+    describe('Integer and Decimal Parameter Formatting', () => {
+      it('should format integer type with suffix', () => {
+        expect(formatParameterValue(5, { type: 'integer', suffix: ' bps' })).toBe('5 bps');
+      });
+
+      it('should format integer type without suffix', () => {
+        expect(formatParameterValue(5, { type: 'integer' })).toBe('5');
+      });
+
+      it('should format decimal type with suffix', () => {
+        expect(formatParameterValue(3.14, { type: 'decimal', suffix: '%' })).toBe('3.14%');
+      });
+
+      it('should format decimal type without suffix', () => {
+        expect(formatParameterValue(3.14, { type: 'decimal' })).toBe('3.14');
+      });
+    });
+
     describe('Default Parameter Formatting', () => {
       it('should format default type without suffix', () => {
         const conditionalParam = { type: 'number' };
@@ -2576,6 +2610,24 @@ describe('Strategy Helpers', () => {
     });
 
     describe('Edge Cases', () => {
+      it('should flag positions with no pool field as unable to validate', () => {
+        // Hits the `if (!position.pool)` branch — different from the
+        // "missing pool data" branch below (which fires when pool ID exists
+        // but the pools map has no entry for it).
+        const vaultPositions = [
+          { id: '12345' /* no pool field */ },
+          { /* no id, no pool */ },
+        ];
+        const result = validatePositionsForStrategy(vaultPositions, {}, ['ETH']);
+        expect(result.isValid).toBe(false);
+        expect(result.warnings).toHaveLength(1);
+        expect(result.warnings[0].count).toBe(2);
+        expect(result.warnings[0].items[0].tokenPair).toBe('Unknown - missing pool ID');
+        expect(result.warnings[0].items[0].nonMatchingTokens).toEqual(['Unable to validate - missing pool ID']);
+        // Second position has no id — falls back to position-index naming
+        expect(result.warnings[0].items[1].id).toBe('position-1');
+      });
+
       it('should flag positions with missing pool data as unable to validate', () => {
         const vaultPositions = [
           { id: '111', pool: '0xaaa' },
@@ -2903,4 +2955,139 @@ describe('Strategy Helpers', () => {
     });
   });
 
+});
+
+// =============================================================================
+// Config-injection tests — cover guards that fire only when strategies config
+// is malformed (or uses shapes the real 'none'/'bob' strategies don't).
+// Uses vi.doMock + resetModules + dynamic import (same pattern as theGraph /
+// platformHelpers / chainHelpers config-injection tests).
+// =============================================================================
+describe('strategyHelpers — config-injection tests', () => {
+  let mocked;
+
+  // Minimal valid base that satisfies every structural check in
+  // getStrategyDetails before reaching the tokenSupport-specific guards.
+  const baseValid = {
+    id: 'base', name: 'Base', subtitle: '_', description: '_',
+    icon: '_', color: '_', borderColor: '_', textColor: '_',
+    minTokens: 1, maxTokens: 1,
+    minPlatforms: 1, maxPlatforms: 1,
+    minPositions: 1, maxPositions: 1,
+    parameters: {},
+    strategyProperties: {},
+    templates: {},
+    parameterGroups: {},
+    contractParametersGroups: {},
+    templateEnumMap: {},
+  };
+
+  beforeAll(async () => {
+    vi.doMock('../../../src/configs/strategies.js', () => ({
+      default: {
+        // Valid stablecoins strategy — exercises getStrategyDetails line 203
+        // and getStrategyTokens lines 785-786.
+        stablecoinsStrat: { ...baseValid, id: 'stablecoinsStrat', tokenSupport: 'stablecoins' },
+
+        // Valid custom strategy — exercises getStrategyDetails line 205.
+        customStrat: { ...baseValid, id: 'customStrat', tokenSupport: 'custom',
+          supportedTokens: { FOO: { symbol: 'FOO', decimals: 18 } } },
+
+        // tokenSupport value not in the enum — exercises line 159-160.
+        bogusTokenSupport: { ...baseValid, id: 'bogusTokenSupport', tokenSupport: 'bogus' },
+
+        // tokenSupport 'custom' with no supportedTokens — exercises 164-166.
+        customNoTokens: { ...baseValid, id: 'customNoTokens', tokenSupport: 'custom' },
+
+        // tokenSupport 'custom' with empty supportedTokens — exercises 167-169.
+        customEmpty: { ...baseValid, id: 'customEmpty', tokenSupport: 'custom', supportedTokens: {} },
+
+        // tokenSupport 'all' with a supportedTokens property — exercises 172-173.
+        allWithExtra: { ...baseValid, id: 'allWithExtra', tokenSupport: 'all',
+          supportedTokens: { FOO: {} } },
+
+        // Strategy with integer + select param types — exercises the
+        // integer-whole-number guard (615-619) and select-invalid-option
+        // guard (634-639) in validateStrategyParams.
+        paramTypes: {
+          ...baseValid,
+          id: 'paramTypes',
+          tokenSupport: 'all',
+          parameters: {
+            intParam: { type: 'integer', name: 'IntParam', min: 1, max: 100 },
+            selectParam: { type: 'select', name: 'SelectParam',
+              options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }] },
+          },
+        },
+      },
+    }));
+    vi.resetModules();
+    mocked = await import('../../../src/helpers/strategyHelpers.js');
+  });
+
+  afterAll(() => {
+    vi.doUnmock('../../../src/configs/strategies.js');
+    vi.resetModules();
+  });
+
+  describe('getStrategyDetails tokenSupport guards', () => {
+    it('throws when tokenSupport value is not in the enum', () => {
+      expect(() => mocked.getStrategyDetails('bogusTokenSupport'))
+        .toThrow('tokenSupport must be one of: all, stablecoins, custom');
+    });
+
+    it('throws when tokenSupport "custom" is missing supportedTokens', () => {
+      expect(() => mocked.getStrategyDetails('customNoTokens'))
+        .toThrow('must have valid supportedTokens object');
+    });
+
+    it('throws when tokenSupport "custom" has empty supportedTokens', () => {
+      expect(() => mocked.getStrategyDetails('customEmpty'))
+        .toThrow('must have non-empty supportedTokens');
+    });
+
+    it('throws when non-custom tokenSupport has a supportedTokens property', () => {
+      expect(() => mocked.getStrategyDetails('allWithExtra'))
+        .toThrow('must not have supportedTokens property');
+    });
+
+    it('returns stablecoins via getStablecoins() when tokenSupport is "stablecoins"', () => {
+      const result = mocked.getStrategyDetails('stablecoinsStrat');
+      // getStablecoins() returns tokens flagged isStablecoin — presence of USDC
+      // is sufficient to prove we took the stablecoins branch.
+      expect(result.supportedTokens).toHaveProperty('USDC');
+    });
+
+    it('returns strategy.supportedTokens when tokenSupport is "custom"', () => {
+      const result = mocked.getStrategyDetails('customStrat');
+      expect(result.supportedTokens).toEqual({ FOO: { symbol: 'FOO', decimals: 18 } });
+    });
+  });
+
+  describe('getStrategyTokens — stablecoins branch', () => {
+    it('returns getStablecoins() when tokenSupport is "stablecoins"', () => {
+      const tokens = mocked.getStrategyTokens('stablecoinsStrat');
+      expect(tokens).toHaveProperty('USDC');
+    });
+  });
+
+  describe('validateStrategyParams — integer and select type guards', () => {
+    it('returns error when integer param is not a whole number', () => {
+      const result = mocked.validateStrategyParams('paramTypes', {
+        intParam: 5.5,
+        selectParam: 'a',
+      });
+      expect(result.isValid).toBe(false);
+      expect(result.errors.intParam).toContain('must be a whole number');
+    });
+
+    it('returns error when select param value is not in options', () => {
+      const result = mocked.validateStrategyParams('paramTypes', {
+        intParam: 5,
+        selectParam: 'not-a-valid-option',
+      });
+      expect(result.isValid).toBe(false);
+      expect(result.errors.selectParam).toContain('must be one of the provided options');
+    });
+  });
 });
