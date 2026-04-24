@@ -111,7 +111,9 @@ Tests only need API keys from `.env.local`. All other config (chainId, wsUrl, po
 # Required - AlphaRouter needs real Arbitrum RPC for swap routing
 ALCHEMY_API_KEY=your_alchemy_api_key
 
-# Optional but recommended - without this, CoinGecko rate limits may cause failures
+# Required - fum_library's coingecko service throws on missing key (no
+# silent fallback to anonymous public tier), and fum_automation's test
+# setup passes the env value through unchanged (no test-key fallback).
 COINGECKO_API_KEY=your_coingecko_api_key
 ```
 

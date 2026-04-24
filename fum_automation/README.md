@@ -59,11 +59,14 @@ Copy `.env.example` to `.env.local` and configure:
 | `SSE_PORT` | Port for Server-Sent Events HTTP server |
 | `RETRY_INTERVAL_MS` | Interval between retry cycles for failed vaults |
 | `MAX_FAILURE_DURATION_MS` | Time before a failing vault is blacklisted |
+| `COINGECKO_API_KEY` | CoinGecko API key for token prices — public tier rate-limits silently degrade strategy evaluation, VaultHealth, and Tracker accounting |
 | `THEGRAPH_API_KEY` | The Graph API key for subgraph queries |
 | `ALCHEMY_API_KEY` | Alchemy API key for Arbitrum RPC (see note below) |
 | `BLOCK_EXPLORER_API_KEY` | Block explorer API key (Arbiscan/Snowtrace) for contract verification |
 
 > **Note on ALCHEMY_API_KEY**: Required for both production AND local testing. In production (chainId 42161), it's used for Arbitrum RPC URLs. In local testing (chainId 1337), the AlphaRouter still needs Arbitrum RPC for swap routing.
+
+`start-automation.js` validates all of the above at startup and exits with a clear "Missing required environment variables" error if any are blank.
 
 ### Optional Variables
 
@@ -72,13 +75,10 @@ Copy `.env.example` to `.env.local` and configure:
 | `DEBUG` | `false` | Enable verbose logging |
 | `BLACKLIST_PATH` | `./data/.vault-blacklist.json` | Path to vault blacklist file |
 | `TRACKING_DATA_DIR` | `./data/vaults` | Directory for vault tracking data |
-| `COINGECKO_API_KEY` | - | CoinGecko API key for token prices (see note below) |
 | `TELEGRAM_BOT_API_KEY` | - | Telegram bot API key for notifications |
 | `TELEGRAM_CHAT_ID` | - | Telegram chat ID for notifications |
 | `FORK_CHAIN` | `arbitrum` | Chain to fork for tests (`arbitrum` or `avalanche`) |
 | `DATA_DIR` | `./data` | Base directory for all data files (blacklist, vault tracking) |
-
-> **Note on COINGECKO_API_KEY**: While technically optional, this is **strongly recommended for production**. Without it, the free CoinGecko tier's rate limits will cause price fetching failures under normal operating conditions. For local testing, the lower request volume may stay within free tier limits.
 
 ## Usage
 
