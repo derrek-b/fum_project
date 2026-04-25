@@ -55,9 +55,10 @@ cd fum_library && npm test         # Vitest unit tests
 ```bash
 cd fum_automation && npm run start           # Start automation service (defaults to .env.local, Arbitrum)
 cd fum_automation && npm run start:av        # Start automation against Avalanche fork (uses .env.local.av)
-cd fum_automation && npm test                # All tests
+cd fum_automation && npm test                # Unit tests only (single-fork constraint)
 cd fum_automation && npm run test:v3:run-all # Uniswap V3 workflow tests
 cd fum_automation && npm run test:v4:run-all # Uniswap V4 workflow tests
+cd fum_automation && npm run test:arb        # Run specific V3 or V4 test (vitest run <path>)
 cd fum_automation && npm run test:tj:run-all # All Trader Joe workflow tests
 cd fum_automation && npm run test:tj         # Run specific TJ test (FORK_CHAIN=avalanche vitest run <path>)
 ```
