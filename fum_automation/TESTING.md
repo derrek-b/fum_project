@@ -132,48 +132,63 @@ npm run pack  # Rebuilds and reinstalls library to fum and fum_automation
 
 ## Running Tests
 
-### All Tests
+Tests are **chain-scoped**: each `vitest run` invocation hosts a single Hardhat fork, so V3/V4 (Arbitrum) and Trader Joe (Avalanche) workflow tests cannot share a run. Use the per-chain scripts below.
 
-```bash
-npm test
-```
+| Command | Scope | Fork |
+|---|---|---|
+| `npm test` | Unit tests | none |
+| `npm run test:v3:run-all` | Uniswap V3 workflows | Arbitrum |
+| `npm run test:v4:run-all` | Uniswap V4 workflows | Arbitrum |
+| `npm run test:arb <path>` | A specific V3 or V4 workflow file | Arbitrum |
+| `npm run test:tj:run-all` | Trader Joe V2.2 workflows | Avalanche |
+| `npm run test:tj <path>` | A specific TJ workflow file | Avalanche |
 
-### Unit Tests Only
+> **`test:arb` and `test:tj` require a path argument.** Without one, vitest will run every matching file under the wrong fork (e.g. `npm run test:tj` with no path tries to run the V3/V4 suite on Avalanche and fails).
 
-```bash
-npm test test/unit
-```
+To run the full suite locally, run the three `*:run-all` scripts in sequence — there is intentionally no single command that runs everything, because no single Hardhat fork can serve both chains.
 
-Unit tests are fast (~2-3 seconds) and don't require a blockchain connection. They cover:
+### Unit Tests
+
+`npm test` runs `vitest run test/unit`. Unit tests are fast (~2-3 seconds) and don't require a blockchain connection. They cover:
 - Core services: EventManager, VaultDataService, Tracker, VaultHealth, ServiceHealth
 - Utilities: RetryHelper, errors, patchProviderFeeData
 - BlacklistManager
 
-### Workflow Tests Only
+### Workflow Tests
+
+Workflow tests connect to a shared Hardhat fork (Arbitrum or Avalanche depending on `FORK_CHAIN`), revert to a clean state, and exercise real scenarios (~15-180 seconds each). Always run them through the chain-scoped commands above so the right fork is active.
+
+To run a specific workflow file, use `test:arb` for V3/V4 or `test:tj` for Trader Joe:
 
 ```bash
-npm test test/workflow
-```
-
-Workflow tests connect to the shared Hardhat fork of Arbitrum, revert to clean state, and test real scenarios. They take longer (~15-180 seconds each).
-
-### Specific Test File
-
-```bash
-npm test test/workflow/service-init/BS-0000.test.js
+npm run test:arb test/workflow/service-init/BS-0000.test.js
+npm run test:tj test/workflow/traderjoe/service-init/basic-init.test.js
 ```
 
 ### Watch Mode
 
-```bash
-npm run test:watch
-```
-
-### Coverage Report
+There is no `npm run test:watch` script — watch mode is invoked directly via `vitest`, scoped to a directory compatible with a single fork:
 
 ```bash
-npm run test:coverage
+npx vitest test/unit                                        # unit tests, no fork
+npx vitest test/workflow/v4                                 # V4 watch (Arbitrum fork)
+FORK_CHAIN=avalanche npx vitest test/workflow/traderjoe     # TJ watch (Avalanche fork)
 ```
+
+### Coverage
+
+Line coverage is intentionally not the headline test metric for this codebase, and `test:coverage` and `test:watch` scripts have been removed from `package.json`. Two reasons:
+
+1. **Single-fork constraint.** A single `vitest run` invocation hosts one Hardhat fork at a time, so V3/V4 (Arbitrum) and Trader Joe (Avalanche) workflow tests cannot share a coverage run. Any number from a bare `vitest run --coverage` would always include false-positive failures on the wrong-fork suite.
+2. **Wrong metric for orchestration code.** Even at 100% line coverage, line metrics don't tell you whether the *scenarios* are tested — e.g., "vault unlocks with both a queued config update AND a queued offboard, applied in the right order, with the lock re-acquired before cleanup." Most of `src/core/` and `src/strategies/` is exercised through workflow tests that map to scenarios, not lines.
+
+If you need a one-off line-coverage snapshot of the unit tests (unaffected by the fork constraint), run:
+
+```bash
+npx vitest run test/unit --coverage
+```
+
+Treat the result as a sanity backstop, not a target. Scenario coverage is the model for this codebase; until a formal scenario matrix is in place, it lives implicitly in the test-file naming (`BS-XXXX` codes) and the directory structure under `test/workflow/`.
 
 ## Test Naming Convention
 
@@ -420,7 +435,7 @@ describe('My Workflow Test', () => {
 
 ### "Alchemy API key not configured"
 
-Ensure `ALCHEMY_API_KEY` is set in `.env.local`. This is required for workflow tests because the AlphaRouter needs a real Arbitrum RPC.
+Ensure `ALCHEMY_API_KEY` is set in `.env.local`. Workflow tests need it because `hardhat.config.cjs` uses Alchemy as the upstream URL the Hardhat fork node forks from. The AlphaRouter itself routes against the local fork's on-chain state, not Alchemy.
 
 ### "Shared Hardhat state not found"
 

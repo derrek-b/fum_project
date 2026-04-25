@@ -9,7 +9,7 @@ export default defineConfig({
     globalSetup: './test/global-setup.js',
     // Per-file setup - loads env vars, initializes fum_library
     setupFiles: ['./test/setup.js'],
-    include: ['./test/**/*.test.js', './backtest/**/*.js'],
+    include: ['./test/**/*.test.js'],
     testTimeout: 480000, // 8 minutes - AlphaRouter EXACT_OUTPUT quotes are slow on Hardhat forks
     hookTimeout: 480000, // 8 minutes - vault setup includes AlphaRouter-dependent service.start()
     teardownTimeout: 5000, // 5 seconds for teardown (reduces hanging wait)

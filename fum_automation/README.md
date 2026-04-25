@@ -1,6 +1,6 @@
 # F.U.M. Automation
 
-Automated liquidity management service for the F.U.M. (Friendly Uniswap Manager) protocol, handling position monitoring and lifecycle operations.
+Automated liquidity management service for the FUM application, handling position monitoring and lifecycle operations.
 
 > `fum_automation` is one subproject in the [fum_project monorepo](../README.md). The root README has the big-picture architecture and sibling-project overview; this doc covers `fum_automation` specifically.
 
@@ -12,37 +12,44 @@ The F.U.M. Automation service provides 24/7 automated management of liquidity po
 
 - **Event-Driven Architecture**: Real-time monitoring of price movements and fee accrual
 - **Strategy Support**: Baby Steps Strategy for simplified liquidity management
-- **Multi-Platform Support**: Adaptable to different DEXes through platform-specific implementations
-- **Secure Vault Integration**: Integrates with F.U.M. vault contracts via authorized service relationships
 - **SSE Broadcasting**: Real-time event streaming to connected clients
 - **Flexible Notification System**: Supports Telegram alerts for key events and actions
 
 ## Architecture
 
-The automation service consists of several core components:
+The service is organized into three layers under `src/`:
 
-- **AutomationService**: Central service managing vault authorization and coordinating operations
-- **EventManager**: Centralized event handling system for contract and internal events
-- **VaultDataService**: Caching and data management layer for vault information
-- **Strategy Classes**: Implements strategy-specific logic and monitoring
-- **SSEBroadcaster**: Server-Sent Events for real-time client updates
+**Core (`src/core/`)** — long-lived components that orchestrate the service:
+
+- **AutomationService**: Vault discovery, strategy allocation, and the main processing loop
+- **VaultDataService**: Caching and data management layer for vault state, positions, and token balances
+- **EventManager**: Centralized pub/sub for contract events and internal events
 - **Tracker**: Transaction history and performance tracking
+- **SSEBroadcaster**: Server-Sent Events stream for real-time client updates
+- **VaultHealth**: Executor gas monitoring and automated top-ups (holdback + funding-required state)
+- **ServiceHealth**: WebSocket subscription canary with ping/pong keepalive
+
+**Strategies (`src/strategies/`)** — strategy implementations extending `StrategyBase`. Currently: BabyStepsStrategy. Strategies are platform-agnostic; platform-specific behavior is delegated to fum_library adapters.
+
+**Utils (`src/utils/`)** — cross-cutting helpers: `RetryHelper` (RPC retry with exponential backoff), `errors` (UnrecoverableError, InsufficientGasError), `patchProviderFeeData` (chain-specific gas fee overrides).
+
+See [docs/architecture/overview.md](./docs/architecture/overview.md) for the full module breakdown and per-subsystem deep dives (cache structures, strategy system, automation flow, event management, executor gas management).
 
 ## Prerequisites
 
-- **Node.js 22+** and npm
-- **fum_library built and packed** into this project — consumed as a local tarball (`file:../fum_library/fum_library-*.tgz`), never via `npm link`. After any change in `../fum_library`, run `cd ../fum_library && npm run pack` to rebuild the tarball and reinstall it here. See the [root README](../README.md) for the full monorepo convention.
+Node.js 22+ and the `fum_library` tarball installed via `npm run pack` — see the [root README](../README.md#monorepo-conventions) for the tarball convention and the `npm link` ban.
 
 ## Installation
 
 ```bash
-# Install dependencies (requires fum_library tarball to exist)
+# Install dependencies (requires fum_library tarball to exist in fum_library sibling-project)
 npm install
 
-# Copy environment template
-cp .env.example .env.local
+# Copy environment template — one file per chain
+cp .env.example .env.local      # Arbitrum (consumed by `npm run start`)
+cp .env.example .env.local.av   # Avalanche (consumed by `npm run start:av`)
 
-# Edit .env.local with your configuration
+# Edit each .env file with chain-appropriate values (CHAIN_ID, WS_URL, etc.)
 ```
 
 ## Configuration
@@ -64,7 +71,7 @@ Copy `.env.example` to `.env.local` and configure:
 | `ALCHEMY_API_KEY` | Alchemy API key for Arbitrum RPC (see note below) |
 | `BLOCK_EXPLORER_API_KEY` | Block explorer API key (Arbiscan/Snowtrace) for contract verification |
 
-> **Note on ALCHEMY_API_KEY**: Required for both production AND local testing. In production (chainId 42161), it's used for Arbitrum RPC URLs. In local testing (chainId 1337), the AlphaRouter still needs Arbitrum RPC for swap routing.
+> **Note on ALCHEMY_API_KEY**: Required for both production AND local testing. In production (chainId 42161), it's the Arbitrum RPC URL the service connects to. In local testing (chainId 1337), it's the upstream URL the Hardhat fork node forks from (see `hardhat.config.cjs`) — the AlphaRouter itself routes against the local fork's on-chain state, not Alchemy.
 
 `start-automation.js` validates all of the above at startup and exits with a clear "Missing required environment variables" error if any are blank.
 
@@ -83,8 +90,11 @@ Copy `.env.example` to `.env.local` and configure:
 ## Usage
 
 ```bash
-# Run automation service
+# Run automation service against Arbitrum (uses .env.local)
 npm run start
+
+# Run automation service against Avalanche (uses .env.local.av)
+npm run start:av
 
 # Run with debug logging
 DEBUG=true npm run start
@@ -92,7 +102,7 @@ DEBUG=true npm run start
 
 The service will:
 1. Connect to the blockchain via WebSocket
-2. Initialize platform adapters (Uniswap V3, V4, Trader Joe V2.2)
+2. Initialize platform adapters (Uniswap V3, V4 on Arbitrum, or Trader Joe V2.2 on Avalanche)
 3. Load authorized vaults from the VaultFactory
 4. Start monitoring positions and events
 5. Expose SSE endpoint at `http://localhost:{SSE_PORT}/events`
@@ -103,58 +113,38 @@ The service will:
 
 A simplified strategy for liquidity management:
 
-- Configurable position range parameters (upper/lower range, thresholds)
+- Configurable position range parameters
 - Fee reinvestment capabilities
 - Automatic rebalancing when price moves out of range
-- Token swap handling for non-aligned assets
+- Token swap & position close handling for non-aligned assets during initialization
 - Designed for beginners and straightforward use cases
 
-## Platform Support
-
-- **Uniswap V3**: Concentrated liquidity on Arbitrum
-- **Uniswap V4**: Concentrated liquidity with hooks on Arbitrum
-- **Trader Joe V2.2**: Liquidity Book (bin-based) on Avalanche
+Additional strategies can be added by extending `StrategyBase` (see [docs/architecture/strategy-system.md](./docs/architecture/strategy-system.md)). Strategies are platform-agnostic — platform-specific behavior is encapsulated behind the `fum_library` PlatformAdapter interface.
 
 ## Testing
 
-See [TESTING.md](TESTING.md) for comprehensive testing documentation including:
+See [TESTING.md](TESTING.md) for comprehensive testing documentation including unit tests, workflow tests with real blockchain interactions, and test naming conventions.
 
-- Unit tests for configuration and utilities
-- Workflow tests with real blockchain interactions
-- Test naming conventions
+Tests are **chain-scoped**: each `vitest run` invocation hosts a single Hardhat fork, so V3/V4 (Arbitrum) and Trader Joe (Avalanche) workflow tests cannot share a run. Use the per-chain scripts below.
 
-```bash
-# Run all tests
-npm test
+| Command | Scope | Fork |
+|---|---|---|
+| `npm test` | Unit tests | none |
+| `npm run test:v3:run-all` | Uniswap V3 workflows | Arbitrum |
+| `npm run test:v4:run-all` | Uniswap V4 workflows | Arbitrum |
+| `npm run test:arb <path>` | A specific V3 or V4 workflow file | Arbitrum |
+| `npm run test:tj:run-all` | Trader Joe V2.2 workflows | Avalanche |
+| `npm run test:tj <path>` | A specific TJ workflow file | Avalanche |
 
-# Run unit tests only
-npm test test/unit
+> **`test:arb` and `test:tj` require a path argument.** Without one, vitest will run every matching file under the wrong fork (e.g. `npm run test:tj` with no path tries to run the V3/V4 suite on Avalanche and fails). Always pass a specific test file: `npm run test:tj test/workflow/traderjoe/service-init/basic-init.test.js`.
 
-# Run workflow tests only
-npm test test/workflow
+To run the full suite locally, run the three `*:run-all` scripts in sequence — there is intentionally no single `npm test` that runs everything, because no single Hardhat fork can serve both chains.
 
-# Run specific test
-npm test test/workflow/service-init/BS-0000.test.js
+## Backtesting
 
-# Platform-specific workflow tests
-npm run test:v3:run-all    # Uniswap V3 (FORK_CHAIN=arbitrum)
-npm run test:v4:run-all    # Uniswap V4 (FORK_CHAIN=arbitrum)
-npm run test:tj:run-all    # Trader Joe V2.2 (FORK_CHAIN=avalanche)
+> **Status: in development — not part of the supported automation runtime.**
 
-# Watch mode
-npm run test:watch
-
-# Coverage report
-npm run test:coverage
-```
-
-## Development
-
-The project follows a modular architecture:
-
-1. **Adding platform support**: Create platform-specific strategy implementations in `src/strategies/{strategyName}/`
-2. **Custom event handlers**: Register with the centralized EventManager
-3. **Extending strategies**: Implement new strategies by extending the base strategy class
+A historical replay engine for evaluating strategies against collected on-chain data lives in [`backtest/`](backtest/README.md). It is being built out separately from the production service.
 
 ## Full Ecosystem Testing
 
