@@ -57,24 +57,29 @@ cp .env.example .env.local.av   # Avalanche (consumed by `npm run start:av`)
 
 Copy `.env.example` to `.env.local` and configure:
 
-### Required Variables
+### Required for All Contexts
+
+These are needed for production startup, full integration testing (`npm run start` against a local Hardhat fork), and workflow tests (`npm run test:v3/v4/tj`):
 
 | Variable | Description |
 |----------|-------------|
-| `CHAIN_ID` | Network ID (1337=Hardhat local, 42161=Arbitrum One) |
+| `CHAIN_ID` | Network ID (1337=Hardhat Arbitrum fork, 1338=Hardhat Avalanche fork, 42161=Arbitrum One, 43114=Avalanche C-Chain) |
 | `WS_URL` | WebSocket RPC endpoint for real-time events |
-| `AUTOMATION_MNEMONIC` | BIP-39 mnemonic for executor HD wallet (derives per-vault signing keys) |
+| `AUTOMATION_MNEMONIC` | BIP-39 mnemonic for executor HD wallet (derives per-vault signing keys). For local testing, must match `DEV_MNEMONIC` in `fum/test/scripts/seed*.js` so the seed-funded executor matches what automation derives. |
 | `SSE_PORT` | Port for Server-Sent Events HTTP server |
 | `RETRY_INTERVAL_MS` | Interval between retry cycles for failed vaults |
 | `MAX_FAILURE_DURATION_MS` | Time before a failing vault is blacklisted |
 | `COINGECKO_API_KEY` | CoinGecko API key for token prices — public tier rate-limits silently degrade strategy evaluation, VaultHealth, and Tracker accounting |
-| `THEGRAPH_API_KEY` | The Graph API key for subgraph queries |
-| `ALCHEMY_API_KEY` | Alchemy API key for Arbitrum RPC (see note below) |
-| `BLOCK_EXPLORER_API_KEY` | Block explorer API key (Arbiscan/Snowtrace) for contract verification |
+| `THEGRAPH_API_KEY` | The Graph API key for subgraph queries (V4 pool discovery + position lookup; hard-throws on missing key when V4 paths run) |
+| `ALCHEMY_API_KEY` | Used as RPC URL in production (chain 42161/43114), as the Hardhat fork upstream in workflow tests (`hardhat.config.cjs`), and ignored by `npm run start` against a local fork. Set it for any local-dev workflow since tests share this `.env.local`. |
 
-> **Note on ALCHEMY_API_KEY**: Required for both production AND local testing. In production (chainId 42161), it's the Arbitrum RPC URL the service connects to. In local testing (chainId 1337), it's the upstream URL the Hardhat fork node forks from (see `hardhat.config.cjs`) — the AlphaRouter itself routes against the local fork's on-chain state, not Alchemy.
+### Required for Production Only
 
-`start-automation.js` validates all of the above at startup and exits with a clear "Missing required environment variables" error if any are blank.
+| Variable | Description |
+|----------|-------------|
+| `BLOCK_EXPLORER_API_KEY` | Arbiscan / Etherscan v2 API key for V4 native-ETH fee tracking. The V4 adapter's receipt parsers query internal-tx data to recover ETH fees (V4 emits no Collect events for native ETH). Path degrades gracefully (null fees + warning) on failure. Skipped by `start-automation.js` when `CHAIN_ID` is 1337 or 1338 — fork txs aren't indexed on Arbiscan, so the call returns no data regardless. Safe to leave blank for local dev. |
+
+`start-automation.js` validates the appropriate set of vars at startup based on `CHAIN_ID` and exits with a clear "Missing required environment variables" error if any are blank.
 
 ### Optional Variables
 

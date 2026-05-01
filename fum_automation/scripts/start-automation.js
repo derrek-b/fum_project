@@ -13,12 +13,18 @@ import dotenv from 'dotenv';
 import AutomationService from '../src/core/AutomationService.js';
 import contracts from 'fum_library/artifacts/contracts';
 import { initFumLibrary } from 'fum_library';
+import { isLocalChain } from 'fum_library/helpers';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Required environment variables
-const REQUIRED_VARS = [
+// Required env vars split by context. BLOCK_EXPLORER_API_KEY is the only key
+// that is genuinely production-only — it powers V4 native-ETH fee tracking
+// via Arbiscan internal-tx queries, which has no useful response on a local
+// Hardhat fork (fork txs aren't indexed there). All other keys are needed
+// somewhere in local dev (either by `npm run start` against a local fork
+// or by the workflow tests that share this same .env.local).
+const BASE_REQUIRED = [
   'CHAIN_ID',
   'WS_URL',
   'AUTOMATION_MNEMONIC',
@@ -28,11 +34,11 @@ const REQUIRED_VARS = [
   'COINGECKO_API_KEY',
   'THEGRAPH_API_KEY',
   'ALCHEMY_API_KEY',
-  'BLOCK_EXPLORER_API_KEY'
 ];
+const PRODUCTION_ONLY = ['BLOCK_EXPLORER_API_KEY'];
 
 // Check if env vars are already set (production) or need to be loaded from file (development)
-const allVarsSet = REQUIRED_VARS.every(key => process.env[key]);
+const allVarsSet = BASE_REQUIRED.every(key => process.env[key]);
 
 if (allVarsSet) {
   console.log('Using environment variables from platform');
@@ -49,7 +55,25 @@ if (allVarsSet) {
  * @throws {Error} If required variables are missing
  */
 function loadConfig() {
-  const missing = REQUIRED_VARS.filter(key => !process.env[key]);
+  // CHAIN_ID must exist and parse before we can decide which other vars are required
+  if (!process.env.CHAIN_ID) {
+    console.error('Missing required environment variable: CHAIN_ID');
+    console.error('Set it in .env.local (development) or in your platform config (production)');
+    process.exit(1);
+  }
+  const chainId = parseInt(process.env.CHAIN_ID);
+  if (!Number.isFinite(chainId) || chainId <= 0) {
+    console.error(`Invalid CHAIN_ID: ${process.env.CHAIN_ID}`);
+    process.exit(1);
+  }
+
+  // On local Hardhat forks (1337/1338), BLOCK_EXPLORER_API_KEY is skipped —
+  // fork txs aren't indexed on Arbiscan, so the V4 ETH-fee path returns null
+  // regardless of key. On production chains, all keys are required.
+  const required = isLocalChain(chainId)
+    ? BASE_REQUIRED
+    : [...BASE_REQUIRED, ...PRODUCTION_ONLY];
+  const missing = required.filter(key => !process.env[key]);
 
   if (missing.length > 0) {
     console.error(`Missing required environment variables: ${missing.join(', ')}`);
@@ -66,7 +90,7 @@ function loadConfig() {
   }
 
   return {
-    chainId: parseInt(process.env.CHAIN_ID),
+    chainId,
     wsUrl: process.env.WS_URL,
     debug: process.env.DEBUG === 'true',
     dataDir: process.env.DATA_DIR,
@@ -100,9 +124,9 @@ async function main() {
     // Load and validate configuration
     const config = loadConfig();
 
-    // Initialize fum_library with API keys
-    // Note: Alchemy key is required for local testing (chainId 1337) because
-    // the AlphaRouter needs a real Arbitrum RPC for swap routing
+    // Initialize fum_library with API keys. initFumLibrary is permissive —
+    // each service is configured only if its key is truthy, so passing
+    // undefined for BLOCK_EXPLORER_API_KEY on local chains is fine.
     initFumLibrary({
       coingeckoApiKey: process.env.COINGECKO_API_KEY,
       alchemyApiKey: process.env.ALCHEMY_API_KEY,
