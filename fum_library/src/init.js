@@ -28,7 +28,7 @@ import { configureTheGraph } from './services/theGraph.js';
  *   coingeckoApiKey: process.env.NEXT_PUBLIC_COINGECKO_API_KEY,
  *   alchemyApiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
  *   blockExplorerApiKey: process.env.NEXT_PUBLIC_BLOCK_EXPLORER_API_KEY,
- *   theGraphApiKey: process.env.NEXT_PUBLIC_THE_GRAPH_API_KEY,
+ *   theGraphApiKey: process.env.NEXT_PUBLIC_THEGRAPH_API_KEY,
  * });
  *
  * @example
@@ -38,7 +38,7 @@ import { configureTheGraph } from './services/theGraph.js';
  * initFumLibrary({
  *   coingeckoApiKey: process.env.COINGECKO_API_KEY,
  *   blockExplorerApiKey: process.env.BLOCK_EXPLORER_API_KEY,
- *   theGraphApiKey: process.env.THE_GRAPH_API_KEY,
+ *   theGraphApiKey: process.env.THEGRAPH_API_KEY,
  * });
  */
 export function initFumLibrary({ coingeckoApiKey, alchemyApiKey, blockExplorerApiKey, theGraphApiKey } = {}) {

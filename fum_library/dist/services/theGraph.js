@@ -19,7 +19,7 @@ let _config = {
  * @param {string} [options.apiKey] - The Graph API key for authenticated requests
  * @example
  * import { configureTheGraph } from 'fum_library/services/theGraph';
- * configureTheGraph({ apiKey: process.env.THE_GRAPH_API_KEY });
+ * configureTheGraph({ apiKey: process.env.THEGRAPH_API_KEY });
  */
 export function configureTheGraph({ apiKey } = {}) {
   if (apiKey !== undefined) {

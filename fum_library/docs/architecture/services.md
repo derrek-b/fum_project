@@ -100,7 +100,7 @@ Queries The Graph Protocol subgraphs for pool data and V4 position discovery.
 ```javascript
 import { configureTheGraph } from 'fum_library/services/theGraph';
 
-configureTheGraph({ apiKey: process.env.THE_GRAPH_API_KEY });
+configureTheGraph({ apiKey: process.env.THEGRAPH_API_KEY });
 ```
 
 All query functions require the API key to be configured first. Throws if called without it.

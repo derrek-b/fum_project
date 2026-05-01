@@ -59,7 +59,7 @@ initFumLibrary({
   coingeckoApiKey: process.env.COINGECKO_API_KEY,
   alchemyApiKey: process.env.ALCHEMY_API_KEY,
   blockExplorerApiKey: process.env.BLOCK_EXPLORER_API_KEY,
-  theGraphApiKey: process.env.THE_GRAPH_API_KEY,
+  theGraphApiKey: process.env.THEGRAPH_API_KEY,
 });
 ```
 
