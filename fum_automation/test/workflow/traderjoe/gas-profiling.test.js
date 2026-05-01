@@ -147,6 +147,43 @@ describe('TJ V2.2 Gas Profiling — Bin Count Scaling', () => {
         }
       }
 
+      // Wall-clock table: diagnostic for Hardhat-fork lazy state fetching.
+      // Linear scaling with bin count is consistent with cold per-bin storage slots
+      // being fetched from the upstream Alchemy node on first read.
+      console.log(`\nWall-clock time (Hardhat fork lazy-fetch diagnostic):`);
+      console.log(`${'Bins'.padStart(6)} | ${'Create (ms)'.padStart(12)} | ${'Collect (ms)'.padStart(14)} | ${'Close (ms)'.padStart(12)} | ${'Total (ms)'.padStart(12)}`);
+      console.log(`${'-'.repeat(6)} | ${'-'.repeat(12)} | ${'-'.repeat(14)} | ${'-'.repeat(12)} | ${'-'.repeat(12)}`);
+
+      for (const r of gasResults) {
+        const totalMs = (r.createMs || 0) + (r.collectMs || 0) + (r.closeMs || 0);
+        console.log(
+          `${String(r.bins).padStart(6)} | ` +
+          `${(r.createMs != null ? fmt(r.createMs) : 'N/A').padStart(12)} | ` +
+          `${(r.collectMs != null ? fmt(r.collectMs) : 'N/A').padStart(14)} | ` +
+          `${(r.closeMs != null ? fmt(r.closeMs) : 'N/A').padStart(12)} | ` +
+          `${(totalMs ? fmt(totalMs) : 'N/A').padStart(12)}`
+        );
+      }
+
+      // Per-bin marginal wall-clock cost
+      if (gasResults.length >= 2) {
+        console.log(`\nPer-bin marginal wall-clock cost (average across measurements):`);
+        for (const op of ['create', 'collect', 'close']) {
+          const msKey = `${op}Ms`;
+          const points = gasResults.filter(r => r[msKey] != null);
+          if (points.length >= 2) {
+            const diffs = [];
+            for (let i = 1; i < points.length; i++) {
+              const dMs = points[i][msKey] - points[i - 1][msKey];
+              const dBins = points[i].bins - points[i - 1].bins;
+              diffs.push(dMs / dBins);
+            }
+            const avg = Math.round(diffs.reduce((a, b) => a + b, 0) / diffs.length);
+            console.log(`  ${op.padEnd(12)}: ~${avg} ms/bin`);
+          }
+        }
+      }
+
       console.log(`${'='.repeat(78)}\n`);
     }
 
@@ -157,7 +194,12 @@ describe('TJ V2.2 Gas Profiling — Bin Count Scaling', () => {
     describe(`${binCount} bins`, () => {
       let positionId;
       let positionData;
-      const result = { bins: binCount, create: null, collect: null, close: null };
+      const result = {
+        bins: binCount,
+        create: null, createMs: null,
+        collect: null, collectMs: null,
+        close: null, closeMs: null,
+      };
 
       // Push result ref now so ordering is preserved even if tests fail
       gasResults.push(result);
@@ -216,6 +258,7 @@ describe('TJ V2.2 Gas Profiling — Bin Count Scaling', () => {
         // Execute through vault — explicit gas limit to account for EIP-150 63/64 rule.
         // The inner call{} in PositionVault only gets 63/64 of remaining gas, which can
         // be insufficient when the gas estimate is tight (especially for mid-range bin counts).
+        const createT0 = performance.now();
         const estimatedGas = await vaultContract.estimateGas.mint(
           [createData.to], [createData.data], [createData.value]
         );
@@ -226,6 +269,7 @@ describe('TJ V2.2 Gas Profiling — Bin Count Scaling', () => {
           { gasLimit: estimatedGas.mul(130).div(100) } // 30% buffer over estimate
         );
         const mintReceipt = await mintTx.wait();
+        result.createMs = Math.round(performance.now() - createT0);
         result.create = mintReceipt.gasUsed.toNumber();
 
         // Extract positionId from PositionCreated event
@@ -236,7 +280,7 @@ describe('TJ V2.2 Gas Profiling — Bin Count Scaling', () => {
         expect(createdLog).toBeDefined();
         positionId = ethers.BigNumber.from(createdLog.topics[1]).toString();
 
-        console.log(`  [${binCount} bins] Create: ${result.create.toLocaleString()} gas (positionId: ${positionId})`);
+        console.log(`  [${binCount} bins] Create: ${result.create.toLocaleString()} gas, ${result.createMs} ms (positionId: ${positionId})`);
         expect(result.create).toBeGreaterThan(0);
       });
 
@@ -291,13 +335,15 @@ describe('TJ V2.2 Gas Profiling — Bin Count Scaling', () => {
         });
 
         if (collectData) {
+          const collectT0 = performance.now();
           const collectTx = await vaultContract.collect(
             [collectData.to],
             [collectData.data]
           );
           const collectReceipt = await collectTx.wait();
+          result.collectMs = Math.round(performance.now() - collectT0);
           result.collect = collectReceipt.gasUsed.toNumber();
-          console.log(`  [${binCount} bins] Collect fees: ${result.collect.toLocaleString()} gas`);
+          console.log(`  [${binCount} bins] Collect fees: ${result.collect.toLocaleString()} gas, ${result.collectMs} ms`);
         } else {
           console.log(`  [${binCount} bins] Collect fees: no fees to collect (feeShares all zero)`);
         }
@@ -320,14 +366,16 @@ describe('TJ V2.2 Gas Profiling — Bin Count Scaling', () => {
 
         // TJ uses vault.decreaseLiquidity() for both partial and full removal
         // (vault.burn() hits validateBurn which isn't implemented for TJ)
+        const closeT0 = performance.now();
         const closeTx = await vaultContract.decreaseLiquidity(
           [closeData.to],
           [closeData.data]
         );
         const closeReceipt = await closeTx.wait();
+        result.closeMs = Math.round(performance.now() - closeT0);
         result.close = closeReceipt.gasUsed.toNumber();
 
-        console.log(`  [${binCount} bins] Close: ${result.close.toLocaleString()} gas`);
+        console.log(`  [${binCount} bins] Close: ${result.close.toLocaleString()} gas, ${result.closeMs} ms`);
         expect(result.close).toBeGreaterThan(0);
       });
     });

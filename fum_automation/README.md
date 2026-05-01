@@ -42,8 +42,9 @@ Node.js 22+ and the `fum_library` tarball installed via `npm run pack` — see t
 ## Installation
 
 ```bash
-# Install dependencies (requires fum_library tarball to exist in fum_library sibling-project)
-npm install
+# Install dependencies (requires fum_library tarball to exist in fum_library sibling-project).
+# .npmrc omits dev + optional dependencies for production deployment, so use setup:dev locally:
+npm run setup:dev
 
 # Copy environment template — one file per chain
 cp .env.example .env.local      # Arbitrum (consumed by `npm run start`)
@@ -130,15 +131,15 @@ Tests are **chain-scoped**: each `vitest run` invocation hosts a single Hardhat 
 | Command | Scope | Fork |
 |---|---|---|
 | `npm test` | Unit tests | none |
-| `npm run test:v3:run-all` | Uniswap V3 workflows | Arbitrum |
-| `npm run test:v4:run-all` | Uniswap V4 workflows | Arbitrum |
+| `npm run test:v3` | Uniswap V3 workflows | Arbitrum |
+| `npm run test:v4` | Uniswap V4 workflows | Arbitrum |
 | `npm run test:arb <path>` | A specific V3 or V4 workflow file | Arbitrum |
-| `npm run test:tj:run-all` | Trader Joe V2.2 workflows | Avalanche |
-| `npm run test:tj <path>` | A specific TJ workflow file | Avalanche |
+| `npm run test:tj` | Trader Joe V2.2 workflows | Avalanche |
+| `npm run test:av <path>` | A specific TJ workflow file | Avalanche |
 
-> **`test:arb` and `test:tj` require a path argument.** Without one, vitest will run every matching file under the wrong fork (e.g. `npm run test:tj` with no path tries to run the V3/V4 suite on Avalanche and fails). Always pass a specific test file: `npm run test:tj test/workflow/traderjoe/service-init/basic-init.test.js`.
+> **`test:arb` and `test:av` require a path argument.** Without one, vitest will run every matching file under the wrong fork (e.g. `npm run test:av` with no path tries to run the V3/V4 suite on Avalanche and fails). Always pass a specific test file: `npm run test:av test/workflow/traderjoe/service-init/basic-init.test.js`.
 
-To run the full suite locally, run the three `*:run-all` scripts in sequence — there is intentionally no single `npm test` that runs everything, because no single Hardhat fork can serve both chains.
+To run the full suite locally, run `test:v3`, `test:v4`, and `test:tj` in sequence — there is intentionally no single `npm test` that runs everything, because no single Hardhat fork can serve both chains.
 
 ## Backtesting
 

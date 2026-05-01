@@ -1,6 +1,6 @@
 # FUM Automation Testing Guide
 
-This document describes how to run and create tests for the FUM Automation Service.
+This document describes how to run tests for the FUM Automation Service.
 
 > **Note:** For full ecosystem integration testing (frontend + automation + blockchain), see [fum/TESTING.md](../fum/TESTING.md).
 
@@ -65,7 +65,7 @@ Unlike traditional test setups where each test file spawns its own blockchain, w
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                    globalSetup.js                        │
-│  1. Start Hardhat (port 8545)                           │
+│  1. Start Hardhat (Arb: port 8545; Av: 8546)             │
 │  2. Deploy FUM contracts ONCE                            │
 │  3. Take BASE_SNAPSHOT (contracts deployed, no vaults)   │
 │  4. Save state to .hardhat-state.json                    │
@@ -87,48 +87,23 @@ Unlike traditional test setups where each test file spawns its own blockchain, w
 
 **Benefits:**
 - **Consistent addresses** - Contracts deployed once, addresses never drift
-- **Faster tests** - No Hardhat startup per file (~3-5s saved per file)
+- **Faster tests** - No Hardhat startup or contract deployment per file
 - **No race conditions** - contracts.js updated once in globalSetup
 - **Clean isolation** - Snapshots ensure each test file starts fresh
 
 ## Prerequisites
 
-### Local Development Setup
-
-The `.npmrc` file omits devDependencies for production deployment. For local testing, run:
-
-```bash
-npm run setup:dev
-```
-
-This installs all dev and optional dependencies needed for testing.
-
 ### Environment Variables
 
 Tests only need API keys from `.env.local`. All other config (chainId, wsUrl, ports, etc.) is hardcoded in the test helpers.
 
-```bash
-# Required - AlphaRouter needs real Arbitrum RPC for swap routing
-ALCHEMY_API_KEY=your_alchemy_api_key
+| Variable | When required |
+|---|---|
+| `ALCHEMY_API_KEY` | Always — Hardhat config uses Alchemy as the upstream URL the local fork forks from (both Arbitrum and Avalanche) |
+| `COINGECKO_API_KEY` | Always — `fum_library`'s coingecko service throws on missing key |
+| `THEGRAPH_API_KEY` | V4 workflow tests only — `UniswapV4Adapter` uses The Graph for pool discovery |
 
-# Required - fum_library's coingecko service throws on missing key (no
-# silent fallback to anonymous public tier), and fum_automation's test
-# setup passes the env value through unchanged (no test-key fallback).
-COINGECKO_API_KEY=your_coingecko_api_key
-```
-
-> **Note:** Other `.env.local` variables (CHAIN_ID, WS_URL, AUTOMATION_MNEMONIC, etc.) are for running the service for full ecosystem integration testing, not for unit or workflow tests.
-
-### Dependencies
-
-The GitHub dependency works out of the box for running tests. Workflow tests deploy their own contracts and save addresses to the installed fum_library in `node_modules/`.
-
-**To test local fum_library changes:**
-
-```bash
-cd ../fum_library
-npm run pack  # Rebuilds and reinstalls library to fum and fum_automation
-```
+> **Note:** Other `.env.local` variables (`CHAIN_ID`, `WS_URL`, `AUTOMATION_MNEMONIC`, etc.) are for running the service against an actual chain or in full-stack integration tests, not for unit or workflow tests run from this project. `BLOCK_EXPLORER_API_KEY` can also be left blank: V4 native-ETH fee tracking queries real Arbiscan, but fork txs aren't indexed there, so it returns empty regardless of key — the ETH fee math is covered in `fum_library` by unit tests with mocked fetch responses plus a real-mainnet integration test that hits Arbiscan against a captured historical tx.
 
 ## Running Tests
 
@@ -137,15 +112,15 @@ Tests are **chain-scoped**: each `vitest run` invocation hosts a single Hardhat 
 | Command | Scope | Fork |
 |---|---|---|
 | `npm test` | Unit tests | none |
-| `npm run test:v3:run-all` | Uniswap V3 workflows | Arbitrum |
-| `npm run test:v4:run-all` | Uniswap V4 workflows | Arbitrum |
+| `npm run test:v3` | Uniswap V3 workflows | Arbitrum |
+| `npm run test:v4` | Uniswap V4 workflows | Arbitrum |
 | `npm run test:arb <path>` | A specific V3 or V4 workflow file | Arbitrum |
-| `npm run test:tj:run-all` | Trader Joe V2.2 workflows | Avalanche |
-| `npm run test:tj <path>` | A specific TJ workflow file | Avalanche |
+| `npm run test:tj` | Trader Joe V2.2 workflows | Avalanche |
+| `npm run test:av <path>` | A specific TJ workflow file | Avalanche |
 
-> **`test:arb` and `test:tj` require a path argument.** Without one, vitest will run every matching file under the wrong fork (e.g. `npm run test:tj` with no path tries to run the V3/V4 suite on Avalanche and fails).
+> **`test:arb` and `test:av` require a path argument.** Without one, vitest will run every file under the same fork (e.g. `npm run test:arb` with no path tries to run the TJ suite on Arbitrum and fails).
 
-To run the full suite locally, run the three `*:run-all` scripts in sequence — there is intentionally no single command that runs everything, because no single Hardhat fork can serve both chains.
+To run the full suite locally, run `test:v3`, `test:v4`, and `test:tj` in sequence — there is intentionally no single command that runs everything, because no single Hardhat fork can serve both chains.
 
 ### Unit Tests
 
@@ -158,11 +133,11 @@ To run the full suite locally, run the three `*:run-all` scripts in sequence —
 
 Workflow tests connect to a shared Hardhat fork (Arbitrum or Avalanche depending on `FORK_CHAIN`), revert to a clean state, and exercise real scenarios (~15-180 seconds each). Always run them through the chain-scoped commands above so the right fork is active.
 
-To run a specific workflow file, use `test:arb` for V3/V4 or `test:tj` for Trader Joe:
+To run a specific workflow file, use `test:arb` for V3/V4 or `test:av` for Trader Joe:
 
 ```bash
 npm run test:arb test/workflow/service-init/BS-0000.test.js
-npm run test:tj test/workflow/traderjoe/service-init/basic-init.test.js
+npm run test:av test/workflow/traderjoe/service-init/basic-init.test.js
 ```
 
 ### Watch Mode
@@ -208,7 +183,7 @@ Each digit represents a count:
 
 | Position | Meaning |
 |----------|---------|
-| X (1st) | Aligned positions |
+| X (1st) | Positions aligned with strategy targets |
 | Y (2nd) | Non-aligned positions |
 | Z (3rd) | Aligned tokens (non-position balances) |
 | W (4th) | Non-aligned tokens (non-position balances) |
@@ -228,208 +203,10 @@ Additional test files: `basic-init.test.js` (basic startup), `init-errors.test.j
 
 ### Aligned vs Non-Aligned
 
-- **Aligned position**: Position tokens match the vault's target tokens
+- **Aligned position**: Position tokens match the vault's target tokens and target platform
 - **Non-aligned position**: Position tokens don't match targets (will be closed)
 - **Aligned token**: Token in vault matches a target token
 - **Non-aligned token**: Token in vault doesn't match targets (will be swapped)
-
-## Workflow Test Categories
-
-### service-init/
-
-Tests the complete service initialization flow:
-- Configuration validation
-- Provider connection
-- Contract initialization
-- Adapter setup
-- Vault discovery and loading
-- Position evaluation
-- Initial rebalancing
-
-### service-stop/
-
-Tests graceful shutdown:
-- Event listener cleanup
-- SSE broadcaster shutdown
-- Provider disconnection
-
-### swap-event/
-
-Tests swap detection and rebalancing:
-- Detecting swaps that push positions out of range
-- Triggering rebalance operations
-- Bi-directional price movement handling
-
-### vault-auth/
-
-Tests runtime vault authorization and revocation:
-- Detecting new vault authorizations via events
-- Loading and setting up newly authorized vaults
-- Position creation for new vaults
-- Detecting revocation events and cleaning up vault monitoring
-
-### config-update/
-
-Tests strategy parameter changes at runtime:
-- Handling TargetTokensUpdated and TargetPlatformsUpdated events
-- Re-evaluating positions after config changes
-
-### error-handling/
-
-Tests recovery, failure, and edge case scenarios:
-- Blacklist management and retry
-- Emergency exit triggers
-- Provider reconnection and subscription recovery
-- Swap event and auth event failures
-- Setup retry and retry queue cleanup
-- Executor funding error paths
-- Ownership verification edge cases
-
-### executor-funding/
-
-Tests executor gas management:
-- Automated top-ups from vault holdbacks
-- Funding-required state detection
-
-### vault-setup/
-
-Tests vault initialization edge cases:
-- Setup error handling and recovery
-
-### v4/
-
-Uniswap V4-specific workflow tests:
-- V4 service initialization and position creation
-- V4 execution flows
-- V4 gas profiling
-
-### traderjoe/
-
-Trader Joe V2.2-specific workflow tests (run with `FORK_CHAIN=avalanche`):
-- TJ service initialization and bin-based position creation
-- TJ execution flows
-- TJ gas profiling
-
-## Test Helper Files
-
-### global-setup.js
-
-Runs once before all tests:
-- Starts a single Hardhat instance on port 8545
-- Deploys FUM contracts (VaultFactory, BabyStepsStrategy)
-- Takes a base snapshot with contracts deployed
-- Saves state to `.hardhat-state.json` for tests to use
-
-### shared-state.js
-
-Utility for sharing state between globalSetup (separate process) and test files:
-- `saveSharedState()` - Saves Hardhat PID, port, snapshot ID, contract addresses
-- `loadSharedState()` - Loads state for test files
-- `clearSharedState()` - Cleans up state file
-
-### hardhat-setup.js / v4-hardhat-setup.js
-
-Provides `setupTestBlockchain()` which:
-- Connects to the shared Hardhat instance
-- Reverts to base snapshot (clean state)
-- Syncs blockchain timestamp with real time
-- Returns test environment with signers, contracts, and config
-
-`v4-hardhat-setup.js` is the V4 variant with hardcoded chainId and different SSE port.
-
-### test-vault-setup.js / v4-vault-setup.js / traderjoe-vault-setup.js
-
-Platform-specific vault setup helpers:
-- Creates a vault via VaultFactory
-- Wraps native tokens and performs swaps to get target tokens
-- Creates positions on the target platform (V3 concentrated, V4 concentrated, or TJ bin-based)
-- Transfers assets to vault
-- Authorizes vault with strategy
-
-### swap-utils.js / v4-swap-utils.js / traderjoe-swap-utils.js
-
-Platform-specific swap simulation helpers for triggering price movements in tests.
-
-### executor-utils.js
-
-Executor funding and gas management utilities for testing top-up workflows.
-
-### tracker-assertions.js
-
-Assertion helpers for validating transaction history entries in Tracker.
-
-### wait-utils.js
-
-Async wait helpers for event-driven test coordination (waiting for event handler completion, timing utilities).
-
-## Writing New Tests
-
-### Unit Test Template
-
-```javascript
-import { describe, it, expect, vi } from 'vitest';
-
-describe('MyModule', () => {
-  describe('myFunction', () => {
-    it('should do something', () => {
-      // Arrange
-      const input = 'test';
-
-      // Act
-      const result = myFunction(input);
-
-      // Assert
-      expect(result).toBe('expected');
-    });
-  });
-});
-```
-
-### Workflow Test Template
-
-```javascript
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import AutomationService from '../../../src/AutomationService.js';
-import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
-import { setupTestVault } from '../../helpers/test-vault-setup.js';
-
-describe('My Workflow Test', () => {
-  let testEnv;
-  let service;
-  let testVault;
-
-  beforeAll(async () => {
-    // Setup blockchain (connects to shared Hardhat, reverts to clean state)
-    testEnv = await setupTestBlockchain();
-
-    // Create test vault with specific configuration
-    testVault = await setupTestVault(
-      testEnv.hardhatServer,
-      testEnv.contracts,
-      testEnv.deployedContracts,
-      {
-        vaultName: 'My Test Vault',
-        automationServiceAddress: testEnv.testConfig.automationServiceAddress,
-        // ... other config
-      }
-    );
-  }, 180000); // Extended timeout for setup
-
-  afterAll(async () => {
-    if (service) await service.stop();
-    await cleanupTestBlockchain(testEnv);
-  });
-
-  it('should do something', async () => {
-    service = new AutomationService(testEnv.testConfig);
-    await service.start();
-
-    // Test assertions...
-
-    expect(service.isRunning).toBe(true);
-  }, 60000);
-});
-```
 
 ## Troubleshooting
 
@@ -445,7 +222,12 @@ This error means `globalSetup.js` didn't run. Ensure:
 
 ### Timeout errors
 
-Workflow tests have extended timeouts (30-180 seconds). If tests still timeout:
+Workflow tests have extended timeouts (30-180 seconds) because two fork-specific overheads dominate wall-clock time:
+
+- **V3/V4 swaps via AlphaRouter** — On chainId 1337 the AlphaRouter can't reach Uniswap's subgraph, so it discovers pools by reading the forked chain on-chain (`StaticV3SubgraphProvider`) and gas-prices via `StaticGasPriceProvider`. EXACT_OUTPUT quotes that would resolve from subgraph data in production fan out into many on-chain calls on the fork. See `fum_library/docs/architecture/adapters.md` for the full config.
+- **TJ position creation** — Hardhat lazy-fetches state slot-by-slot from the upstream Alchemy node on first read. A TJ position spans many ERC1155 bin storage slots (~21 bins typical, up to 51), so `mintWithSwap` blocks on a roundtrip per cold slot. Profiled at ~1.3 seconds per bin on first touch (~80s for a 51-bin position); subsequent operations on the same bins are ~600x faster once warm. See `docs/platform-knowledge/trader-joe-v2-2.md` gotcha #10. Run `FORK_CHAIN=avalanche npx vitest run test/workflow/traderjoe/gas-profiling.test.js` to see the wall-clock-vs-bin-count curve.
+
+If tests still timeout beyond those expected costs:
 - Check network connectivity (Alchemy RPC)
 - Increase timeout in vitest.config.js
 - Check if Hardhat is hanging (look for zombie processes on port 8545)

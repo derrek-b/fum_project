@@ -10,11 +10,11 @@
 ```bash
 npm run start              # Start automation service
 npm test                   # Unit tests only (single-fork constraint — see TESTING.md)
-npm run test:v3:run-all    # Uniswap V3 workflow tests (FORK_CHAIN=arbitrum)
-npm run test:v4:run-all    # Uniswap V4 workflow tests (FORK_CHAIN=arbitrum)
+npm run test:v3            # Uniswap V3 workflow tests (FORK_CHAIN=arbitrum)
+npm run test:v4            # Uniswap V4 workflow tests (FORK_CHAIN=arbitrum)
 npm run test:arb           # Run specific V3 or V4 workflow file (vitest run <path>)
-npm run test:tj:run-all    # All Trader Joe V2.2 workflow tests (FORK_CHAIN=avalanche)
-npm run test:tj            # Run specific TJ test file (FORK_CHAIN=avalanche vitest run <path>)
+npm run test:tj            # All Trader Joe V2.2 workflow tests (FORK_CHAIN=avalanche)
+npm run test:av            # Run specific TJ test file (FORK_CHAIN=avalanche vitest run <path>)
 ```
 
 **Backtesting:**
