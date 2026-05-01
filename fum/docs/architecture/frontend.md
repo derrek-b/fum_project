@@ -19,14 +19,17 @@ Redux Provider (store)
 
 **Module-level initialization** (outside React tree):
 ```javascript
-// _app.js validates all four NEXT_PUBLIC_* keys at module load and throws
-// a clear "Missing required environment variables: ..." error if any are
-// missing (guarded with `NODE_ENV !== 'test'` so unit tests can import freely).
+// _app.js validates the three NEXT_PUBLIC_* keys it actually consumes at
+// module load and throws a clear "Missing required environment variables:
+// ..." error if any are missing (guarded with `NODE_ENV !== 'test'` so unit
+// tests can import freely). BLOCK_EXPLORER_API_KEY is intentionally not
+// required: it powers V4 receipt parsers (parseCollectReceipt /
+// parseClosureReceipt) that the frontend never calls — those run server-side
+// in fum_automation.
 initFumLibrary({
   coingeckoApiKey: process.env.NEXT_PUBLIC_COINGECKO_API_KEY,
   alchemyApiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
   theGraphApiKey: process.env.NEXT_PUBLIC_THEGRAPH_API_KEY,
-  blockExplorerApiKey: process.env.NEXT_PUBLIC_BLOCK_EXPLORER_API_KEY,
 });
 ```
 
