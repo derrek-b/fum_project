@@ -1046,7 +1046,7 @@ describe('The Graph Service - Messari queryType (mocked platform)', () => {
 describe('The Graph Service - API key guard', () => {
   afterEach(() => {
     // Restore between tests so sibling tests start from a known-good state.
-    configureTheGraph({ apiKey: process.env.THE_GRAPH_API_KEY || 'test-key' });
+    configureTheGraph({ apiKey: process.env.THEGRAPH_API_KEY });
   });
 
   describe('resetTheGraphConfig', () => {

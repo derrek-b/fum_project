@@ -10,9 +10,8 @@ Shared library consumed by both `fum` (frontend) and `fum_automation` (automatio
 ```bash
 npm run build            # Build src/ → dist/ (simple file copy)
 npm run pack             # Build + pack tarball + install into fum & fum_automation
-npm test                 # Vitest unit tests
-npm run test:unit        # Unit tests only
-npm run test:integration # Integration tests (requires Hardhat node)
+npm test                 # Vitest tests (forks Arbitrum by default — see README)
+npm run test:watch       # Watch mode
 npm run test:coverage    # Coverage report
 ```
 

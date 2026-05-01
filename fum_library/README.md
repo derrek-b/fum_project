@@ -42,11 +42,12 @@ FUM Library provides a modular toolkit for managing decentralized finance liquid
 }
 ```
 
-To rebuild the tarball and reinstall it into both siblings after editing the library:
+To work on the library locally:
 
 ```bash
 cd fum_library
-npm run pack   # builds, packs, and installs into fum and fum_automation
+npm install      # one-time: install dev dependencies
+npm run pack     # rebuild tarball + reinstall into fum and fum_automation (run after edits)
 ```
 
 > **Never use `npm link`** — see [root README](../README.md) for the full monorepo convention and rationale.
@@ -206,15 +207,23 @@ The library currently includes one production strategy:
 
 Additional strategies can be added by extending `StrategyBase`.
 
-## Development
+## Testing
+
+Tests fork Arbitrum or Avalanche mainnet via Hardhat to exercise real contracts. Default fork is Arbitrum; set `FORK_CHAIN=avalanche` to fork Avalanche on chain 1338.
 
 ```bash
-# Install dependencies
-npm install
+# One-time setup: copy the test env template and fill in API keys
+cp test/.env.test.example test/.env.test
+# Required: ALCHEMY_API_KEY (fork URL), COINGECKO_API_KEY, THEGRAPH_API_KEY,
+#           BLOCK_EXPLORER_API_KEY (V4 native-ETH integration hits real Arbiscan)
 
-# Build distribution package
-npm run build
+npm test                            # Run all tests
+npm run test:watch                  # Watch mode
+npm run test:coverage               # Coverage report
+npm test UniswapV3Adapter.test.js   # Run a specific file
 ```
+
+> **First-run address mismatch is expected.** On the first run (or after contract changes), tests will fail with `💥 DETERMINISTIC ADDRESS VALIDATION FAILED!`, save the new addresses, and exit. Re-run the same command — it'll pass. The fail-fast behavior is intentional, to prevent running a full suite against stale addresses.
 
 ## Architecture
 

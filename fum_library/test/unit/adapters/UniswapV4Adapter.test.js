@@ -6573,6 +6573,57 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           .rejects.toThrow(/Transfer event from .* has insufficient topics: 1/);
       });
     });
+
+    describe('Integration - Real Mainnet ETH Fees', () => {
+      // Captured 2026-04-27 via Etherscan v2 API. Real Uniswap V4 fee collection
+      // on Arbitrum (ETH/LDO pool, block 457004575). The fork's Alchemy passthrough
+      // fetches the historical receipt; parseCollectReceipt's blockExplorer call
+      // hits real Arbiscan, which resolves this real mainnet tx and returns the
+      // actual internal ETH transfer. Validates both ERC20 (Transfer log) and
+      // native ETH (Arbiscan internal-tx) paths end-to-end with no mocks.
+      it('should parse ETH and ERC20 fees from a real Arbitrum mainnet V4 fee-collection tx', async () => {
+        const TX_HASH = '0x3e4b0b80d8fa4a7dbfd0f65c70ea2373b9f32e52c6ec90cf3f8d534034c0aec9';
+        const WALLET = '0x341e48219e04d30d8a0a14e97562a609d3420196';
+        const LDO_ADDRESS = '0x13ad51ed4f1b7e9dc168d8a00cb3f4ddd85efa60';
+        const EXPECTED_ETH_FEES = '32587724607541922';   // 0.0326 ETH (PoolManager → wallet internal tx)
+        const EXPECTED_LDO_FEES = '9034670022637594223'; // ~9.03 LDO (ERC20 Transfer event)
+        const TOKEN_ID = 'real-mainnet-pos';
+
+        // Earlier tests in this file overwrite blockExplorer config with 'test-key';
+        // restore the real key so Arbiscan accepts our request.
+        configureBlockExplorer({ blockExplorerApiKey: process.env.BLOCK_EXPLORER_API_KEY });
+
+        // Fork forwards historical reads to its Alchemy upstream
+        const receipt = await env.provider.getTransactionReceipt(TX_HASH);
+        expect(receipt).not.toBeNull();
+        expect(receipt.transactionHash.toLowerCase()).toBe(TX_HASH);
+
+        const positionMetadata = {
+          [TOKEN_ID]: {
+            position: { liquidity: '1' },                          // single position; value irrelevant
+            token0Data: { address: ethers.constants.AddressZero }, // native ETH
+            token1Data: { address: LDO_ADDRESS }
+          }
+        };
+
+        // chainId 42161 (real Arbitrum) so blockExplorer queries real Arbiscan,
+        // not whatever the fork chainId is.
+        const result = await adapter.parseCollectReceipt(
+          receipt,
+          positionMetadata,
+          { chainId: 42161, walletAddress: WALLET }
+        );
+
+        const fees = result.feesByPosition[TOKEN_ID];
+
+        // ERC20 path: LDO Transfer log parsed from the real receipt
+        expect(fees.token1.toString()).toBe(EXPECTED_LDO_FEES);
+
+        // Native ETH path: blockExplorer fetched the real internal tx and
+        // distributed the entire amount to the single ETH-side position
+        expect(fees.token0.toString()).toBe(EXPECTED_ETH_FEES);
+      }, 60000); // network round-trip to Arbiscan
+    });
   });
 
   describe('parseClosureReceipt', () => {

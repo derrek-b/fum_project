@@ -16,12 +16,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Load test environment variables from test/.env.test
 dotenv.config({ path: path.join(__dirname, '.env.test') });
 
-// Initialize fum_library with test API keys
+// All four API keys are required — fail loud if any are missing rather than
+// silently substituting 'test-key' (which would let mocked tests pass while
+// the real-network integration tests fail unhelpfully).
+const REQUIRED_TEST_KEYS = ['ALCHEMY_API_KEY', 'COINGECKO_API_KEY', 'THEGRAPH_API_KEY', 'BLOCK_EXPLORER_API_KEY'];
+const missing = REQUIRED_TEST_KEYS.filter(k => !process.env[k]);
+if (missing.length > 0) {
+  throw new Error(
+    `Missing required test env vars: ${missing.join(', ')}. ` +
+    `Copy test/.env.test.example to test/.env.test and fill in your keys.`
+  );
+}
+
 initFumLibrary({
-  coingeckoApiKey: process.env.COINGECKO_API_KEY || 'test-key',
+  coingeckoApiKey: process.env.COINGECKO_API_KEY,
   alchemyApiKey: process.env.ALCHEMY_API_KEY,
-  blockExplorerApiKey: process.env.BLOCK_EXPLORER_API_KEY || 'test-key',
-  theGraphApiKey: process.env.THE_GRAPH_API_KEY || 'test-key',
+  blockExplorerApiKey: process.env.BLOCK_EXPLORER_API_KEY,
+  theGraphApiKey: process.env.THEGRAPH_API_KEY,
 });
 
 // Suppress console output during tests (optional)
