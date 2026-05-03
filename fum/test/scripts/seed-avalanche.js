@@ -23,6 +23,7 @@ const CHAIN_ID = 1338;
 const RPC_URL = 'http://localhost:8546';
 const LB_PAIR_ADDRESS = '0x864d4e5ee7318e97483db7eb0912e09f161516ea'; // WAVAX/USDC 10bps pool
 const TEMPLATE_AGGRESSIVE = 3;
+const EXECUTOR_FUNDING = ethers.utils.parseEther('0.0403');
 
 // Avalanche token addresses
 const WAVAX_ADDRESS = '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7';
@@ -293,7 +294,7 @@ async function main() {
   // === 6. Set strategy + targets (opt-in) ===
   if (enableStrategy) {
     const targetPlatform = 'traderjoeV2_2';
-    const targetTokens = ['WAVAX', 'USDC'];
+    const targetTokens = ['AVAX', 'USDC']; // Native symbol — matches UI checkbox; strategy/adapter normalize native→wrapped for TJ positions
 
     console.log(`\nSetting vault targets: ${targetPlatform} / ${targetTokens.join(', ')}...`);
     await (await vault.setTargetPlatforms([targetPlatform])).wait();
@@ -334,9 +335,8 @@ async function main() {
     const hdNode = ethers.utils.HDNode.fromMnemonic(DEV_MNEMONIC);
     const executorAddress = hdNode.derivePath(`m/44'/60'/0'/0/${executorIndex}`).address;
 
-    const executorFunding = ethers.utils.parseEther('10');
-    console.log(`Authorizing executor ${executorAddress} and funding with ${ethers.utils.formatEther(executorFunding)} AVAX...`);
-    await (await vault.setExecutor(executorAddress, { value: executorFunding })).wait();
+    console.log(`Authorizing executor ${executorAddress} and funding with ${ethers.utils.formatEther(EXECUTOR_FUNDING)} AVAX...`);
+    await (await vault.setExecutor(executorAddress, { value: EXECUTOR_FUNDING })).wait();
 
     const executorBalance = await provider.getBalance(executorAddress);
     console.log(`Executor authorized and funded. Balance: ${ethers.utils.formatEther(executorBalance)} AVAX`);

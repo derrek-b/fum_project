@@ -61,6 +61,7 @@ const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
 const FEE = 500;
 const TICK_SPACING = 10;
 const TEMPLATE_AGGRESSIVE = 3;
+const EXECUTOR_FUNDING = ethers.utils.parseEther('0.00207');
 
 // V4 swap action types
 const Actions = {
@@ -402,9 +403,8 @@ async function main() {
     const hdNode = ethers.utils.HDNode.fromMnemonic(DEV_MNEMONIC);
     const executorAddress = hdNode.derivePath(`m/44'/60'/0'/0/${executorIndex}`).address;
 
-    const executorFunding = ethers.utils.parseEther('10');
-    console.log(`Authorizing executor ${executorAddress} and funding with ${ethers.utils.formatEther(executorFunding)} ETH...`);
-    await (await vault.setExecutor(executorAddress, { value: executorFunding })).wait();
+    console.log(`Authorizing executor ${executorAddress} and funding with ${ethers.utils.formatEther(EXECUTOR_FUNDING)} ETH...`);
+    await (await vault.setExecutor(executorAddress, { value: EXECUTOR_FUNDING })).wait();
 
     const executorBalance = await provider.getBalance(executorAddress);
     console.log(`Executor authorized and funded. Balance: ${ethers.utils.formatEther(executorBalance)} ETH`);

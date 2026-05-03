@@ -56,6 +56,7 @@ const POSITION_MANAGER_ADDRESS = '0xC36442b4a4522E871399CD717aBDD847Ab11FE88';
 const UNISWAP_ROUTER_ADDRESS = '0xE592427A0AEce92De3Edee1F18E0157C05861564';
 const FEE_TIER = 500; // 0.05%
 const TEMPLATE_AGGRESSIVE = 3;
+const EXECUTOR_FUNDING = ethers.utils.parseEther('0.00205');
 
 async function main() {
   const enableAutomation = process.env.ENABLE_AUTOMATION === '1';
@@ -196,13 +197,10 @@ async function main() {
 
   // Calculate tick range (±5% centered on current tick)
   const spacing = Number(tickSpacing);
-  let tickLower = Math.floor((currentTick - Math.log(1.05) / Math.log(1.0001)) / spacing) * spacing;
-  let tickUpper = Math.ceil((currentTick + Math.log(1.05) / Math.log(1.0001)) / spacing) * spacing;
-
-  if (currentTick < tickLower || currentTick > tickUpper) {
-    tickLower = Math.floor(currentTick / spacing) * spacing - spacing;
-    tickUpper = Math.ceil(currentTick / spacing) * spacing + spacing;
-  }
+  // ±10 tick spacings ≈ ±1% (matches seed-v4.js and seed-avalanche.js seed widths).
+  const tickRange = spacing * 10;
+  let tickLower = Math.floor(currentTick / spacing) * spacing - tickRange;
+  let tickUpper = Math.floor(currentTick / spacing) * spacing + tickRange;
 
   console.log(`Tick range: ${tickLower} to ${tickUpper}`);
 
@@ -292,7 +290,7 @@ async function main() {
   // === 6. Set strategy + targets (opt-in) ===
   if (enableStrategy) {
     const targetPlatform = 'uniswapV3';
-    const targetTokens = ['WETH', 'USDC'];
+    const targetTokens = ['ETH', 'USDC']; // Native symbol — matches UI checkbox; strategy/adapter normalize native→wrapped for V3 positions
 
     console.log(`\nSetting vault targets: ${targetPlatform} / ${targetTokens.join(', ')}...`);
     await (await vault.setTargetPlatforms([targetPlatform])).wait();
@@ -329,9 +327,8 @@ async function main() {
     const hdNode = ethers.utils.HDNode.fromMnemonic(DEV_MNEMONIC);
     const executorAddress = hdNode.derivePath(`m/44'/60'/0'/0/${executorIndex}`).address;
 
-    const executorFunding = ethers.utils.parseEther('10');
-    console.log(`Authorizing executor ${executorAddress} and funding with ${ethers.utils.formatEther(executorFunding)} ETH...`);
-    await (await vault.setExecutor(executorAddress, { value: executorFunding })).wait();
+    console.log(`Authorizing executor ${executorAddress} and funding with ${ethers.utils.formatEther(EXECUTOR_FUNDING)} ETH...`);
+    await (await vault.setExecutor(executorAddress, { value: EXECUTOR_FUNDING })).wait();
 
     const executorBalance = await provider.getBalance(executorAddress);
     console.log(`Executor authorized and funded. Balance: ${ethers.utils.formatEther(executorBalance)} ETH`);

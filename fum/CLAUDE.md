@@ -31,9 +31,9 @@ npm run generate-fees:av       # Generate fees on WAVAX/USDC (TJ V2.2, supports 
 | `seed-localhost:strategy` | + strategy + targets |
 | `seed-localhost:automation` | + strategy + position moved into vault + executor (triggers automation) |
 | `seed-localhost:v4` / `:v4:strategy` / `:v4:automation` | Same pattern for Uniswap V4 |
-| `seed-localhost:av` | Avalanche TJ: vault + tokens (position only with `ENABLE_POSITION=1`) |
+| `seed-localhost:av` | Avalanche TJ: vault + tokens + position on wallet + generated fees |
 | `seed-localhost:av:strategy` | + strategy + targets |
-| `seed-localhost:av:automation` | + strategy + position minted in vault + executor (triggers automation) |
+| `seed-localhost:av:automation` | + strategy + position transferred to vault + executor (triggers automation) |
 
 **Local frontend dev flow**: `npm run hardhat` → (new terminal) `npm run seed-localhost` → `npm run dev`
 

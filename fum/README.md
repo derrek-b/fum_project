@@ -3,6 +3,8 @@
 A full-stack DeFi application for creating, managing, and automating concentrated liquidity positions across multiple DEX platforms. F.U.M. enables users to deploy personal vaults with configurable automation strategies for hands-off liquidity management.
 
 > `fum` is one subproject in the [fum_project monorepo](../README.md). The root README has the big-picture architecture and sibling-project overview; this doc covers `fum` specifically.
+>
+> **Working directory.** All commands and paths in this doc assume you're at the monorepo root (`fum_project/`). When you see `cd fum && npm run dev`, that's interpreted from the root. See [Monorepo Conventions](../README.md#monorepo-conventions) for details.
 
 ## Overview
 

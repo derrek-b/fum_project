@@ -261,9 +261,7 @@ The Avalanche script additionally deploys TJPositionProxy (implementation) and T
 
 ### Seed Scripts (per-platform)
 
-Each platform has a single combined seed script that creates a vault, funds it, and optionally configures strategy/automation. The old separate `create-test-vault.js` + `seed.js` two-step flow was replaced to eliminate race conditions where `setExecutor` triggered the automation service before the vault was fully configured.
-
-> `test/scripts/create-test-vault.js` and `test/scripts/create-test-vault-avalanche.js` still exist for direct invocation (`node test/scripts/create-test-vault.js ...`), but no npm script wraps them. Prefer the per-platform seed scripts below.
+Each platform has a single combined seed script that creates a vault, funds it, and optionally configures strategy/automation. (Replaced an earlier separate `create-test-vault.js` + `seed.js` two-step flow that had a race condition where `setExecutor` could trigger the automation service before the vault was fully configured.)
 
 **Scripts:**
 - `seed.js` — Uniswap V3 (WETH/USDC on chain 1337)
@@ -274,21 +272,21 @@ Each platform has a single combined seed script that creates a vault, funds it, 
 
 | Flag | Effect |
 |---|---|
-| (none) | Create vault, fund wallet with tokens, transfer tokens to vault |
+| (none) | Create vault, fund wallet with tokens, transfer tokens to vault, mint a liquidity position **on the wallet** (transferable on all three platforms), generate fees via round-trip swaps |
 | `ENABLE_STRATEGY=1` | + set target platform/tokens, configure BabySteps Aggressive strategy |
-| `ENABLE_AUTOMATION=1` | Implies `ENABLE_STRATEGY=1`. + derive per-vault executor from mnemonic, call `setExecutor` (triggers automation service) |
-| `ENABLE_POSITION=1` | (Avalanche only) Create TJ position in vault + generate fees |
+| `ENABLE_AUTOMATION=1` | Implies `ENABLE_STRATEGY=1`. + `safeTransferFrom` the wallet-held position into the vault, derive per-vault executor from mnemonic, call `setExecutor` (triggers automation service) |
 
 **Execution order (designed to prevent race conditions):**
 1. Create vault via VaultFactory
 2. Fund wallet (wrap native, swap for stablecoins)
 3. Transfer tokens to vault
-4. Create position (V3/V4: always; TJ: only with `ENABLE_POSITION=1`)
+4. Create position on the wallet
 5. Generate fees via round-trip swaps
 6. Set strategy + targets (if `ENABLE_STRATEGY` or `ENABLE_AUTOMATION`)
-7. Set executor (if `ENABLE_AUTOMATION`) — **always last**, fires on-chain event
+7. Transfer position to vault (if `ENABLE_AUTOMATION`)
+8. Set executor (if `ENABLE_AUTOMATION`) — **always last**, fires on-chain event
 
-For V3/V4, the position stays on the wallet by default (for transfer testing) and is only transferred to the vault when `ENABLE_AUTOMATION=1`. For TJ, positions are minted directly inside the vault via `vault.mint()`.
+The position stays on the wallet by default (for transfer testing) and is only transferred into the vault when `ENABLE_AUTOMATION=1`. This is uniform across V3, V4, and TJ since TJ positions became transferable.
 
 ### generate-fees.js
 
