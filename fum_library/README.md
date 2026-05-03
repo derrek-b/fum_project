@@ -3,6 +3,8 @@
 A comprehensive JavaScript library for DeFi liquidity management across multiple concentrated-liquidity protocols (Uniswap V3, Uniswap V4, Trader Joe V2.2) and automated strategy execution.
 
 > `fum_library` is one subproject in the [fum_project monorepo](../README.md). The root README has the big-picture architecture and sibling-project overview; this doc covers `fum_library` specifically.
+>
+> **Working directory.** All commands and paths in this doc assume you're at the monorepo root (`fum_project/`). See [Monorepo Conventions](../README.md#monorepo-conventions) for details.
 
 ## Documentation
 
@@ -212,6 +214,8 @@ Additional strategies can be added by extending `StrategyBase`.
 Tests fork Arbitrum or Avalanche mainnet via Hardhat to exercise real contracts. Default fork is Arbitrum; set `FORK_CHAIN=avalanche` to fork Avalanche on chain 1338.
 
 ```bash
+cd fum_library
+
 # One-time setup: copy the test env template and fill in API keys
 cp test/.env.test.example test/.env.test
 # Required: ALCHEMY_API_KEY (fork URL), COINGECKO_API_KEY, THEGRAPH_API_KEY,
