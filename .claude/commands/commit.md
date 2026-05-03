@@ -144,6 +144,17 @@ If the commit added or removed a directory at depth 1–2 under `src/`, `contrac
 1. Check if the subproject's `README.md` contains a section with a heading like "Project Structure", "Module Structure", "Repo Layout", or an ASCII file tree
 2. If yes → flag as `[UPDATE]` with the specific directory change ("added `src/strategies/parrisIsland/`", "removed `scripts/legacy/`")
 
+**Heuristic D — Doc-subtree changes → subtree index README:**
+
+Some `README.md` files are not at the subproject root — they index a subtree (e.g., `docs/README.md`, `fum_automation/docs/README.md`, `fum_automation/backtest/README.md`, `fum_automation/backtest/templates/README.md`). These are typically orientation pages that list the docs/scripts contained in their subtree. They aren't covered by Step 6b (no source mapping) and aren't covered by Heuristics A/B/C (which target subproject-root READMEs only).
+
+For each non-root `README.md` in the repo (i.e., a README.md whose parent is not the repo root or a subproject root like `fum/`, `fum_library/`, `fum_automation/`, `fum_testing/`):
+1. Compute its subtree (the directory containing it, recursive)
+2. If the commit added or removed any files within that subtree (modifications alone do not trigger), flag the index README as `[MAYBE]` — these READMEs typically describe directory structure or list nested files; staleness depends on whether the index actually mentions the changed files.
+3. Include a brief summary of which files/subdirs appeared or disappeared so the user can decide whether the index README needs an edit.
+
+Discovery: shell out to `find <repo-root> -name README.md -not -path '*/node_modules/*'` and filter out the repo-root and subproject-root entries.
+
 **6d. If no docs need updating:**
 Say "No doc updates needed" and stop. The commit is done.
 
