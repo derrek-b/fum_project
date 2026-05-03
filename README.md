@@ -70,6 +70,7 @@ This README is orientation. Each subproject has its own README and TESTING guide
 
 ## Monorepo Conventions
 
+- **Working directory.** All commands and paths in this repo's docs (root + every subproject's README/TESTING/CLAUDE) assume you're at the monorepo root (`fum_project/`). When a doc shows `cd fum_library && npm run pack` or `cd fum_automation`, that's interpreted from the root. Run `cd <path-to-your-clone>/fum_project` first.
 - **Node 22+** — required for ES module JSON import syntax.
 - **ethers.js v5** — the whole codebase uses v5, not v6.
 - **fum_library is consumed via tarball, not `npm link`.** After making changes there, run `cd fum_library && npm run pack` to rebuild and reinstall into the sibling projects. `npm link` causes module-initialization issues in this codebase — always use `npm run pack`.
