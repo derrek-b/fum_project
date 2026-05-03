@@ -19,6 +19,7 @@
     "test:arb": "vitest run",
     "test:tj": "FORK_CHAIN=avalanche vitest run test/workflow/traderjoe",
     "test:av": "FORK_CHAIN=avalanche vitest run",
+    "reset-data": "rm -rf data/vaults && mkdir -p data/vaults && echo '{}' > data/trackingFailures.json && echo '{}' > data/blacklist.json",
     "collect:events:weth-usdc": "node backtest/collectors/collect-v3-events.js --chain 42161 --tokens WETH USDC --fee 500",
     "collect:events:weth-usdc:reverse": "node backtest/collectors/collect-v3-events.js --chain 42161 --tokens WETH USDC --fee 500 --reverse --runs 30",
     "collect:prices:eth": "node backtest/collectors/collect-prices.js ETH",

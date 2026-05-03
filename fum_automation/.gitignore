@@ -17,7 +17,7 @@ node_modules
 !/data/vaults/.gitkeep
 
 # Test data files
-/test/data/.vault-blacklist.json
+/test/data/blacklist.json
 
 cache/
 

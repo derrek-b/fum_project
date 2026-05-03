@@ -109,4 +109,4 @@ See `docs/architecture/automation-flow.md` for the full flow diagrams.
 - **Cache structures** — Reference `docs/architecture/cache-structures.md` before modifying any cached data.
 - **Debugging logs** — Mark with a special emoji so they are easy to find and remove.
 - **Strategy pattern** — When adding new strategies, extend StrategyBase following BabyStepsStrategy's pattern.
-- **fum_library changes** — Run `cd ../fum_library && npm run pack` to pick up library updates.
+- **fum_library changes** — Run `cd fum_library && npm run pack` to pick up library updates.

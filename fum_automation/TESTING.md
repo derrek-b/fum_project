@@ -3,6 +3,8 @@
 This document describes how to run tests for the FUM Automation Service.
 
 > **Note:** For full ecosystem integration testing (frontend + automation + blockchain), see [fum/TESTING.md](../fum/TESTING.md).
+>
+> **Working directory.** All commands and paths in this guide assume you're at the monorepo root (`fum_project/`). See [Monorepo Conventions](../README.md#monorepo-conventions) for details.
 
 ## Overview
 
@@ -236,7 +238,7 @@ If tests still timeout beyond those expected costs:
 
 If tests fail with contract-related errors after code changes:
 ```bash
-cd ../fum_library
+cd fum_library
 npm run pack  # Rebuilds and reinstalls library to fum and fum_automation
 ```
 

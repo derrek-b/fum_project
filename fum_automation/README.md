@@ -3,6 +3,8 @@
 Automated liquidity management service for the FUM application, handling position monitoring and lifecycle operations.
 
 > `fum_automation` is one subproject in the [fum_project monorepo](../README.md). The root README has the big-picture architecture and sibling-project overview; this doc covers `fum_automation` specifically.
+>
+> **Working directory.** All commands and paths in this doc assume you're at the monorepo root (`fum_project/`). See [Monorepo Conventions](../README.md#monorepo-conventions) for details.
 
 ## Overview
 
@@ -44,6 +46,7 @@ Node.js 22+ and the `fum_library` tarball installed via `npm run pack` — see t
 ```bash
 # Install dependencies (requires fum_library tarball to exist in fum_library sibling-project).
 # .npmrc omits dev + optional dependencies for production deployment, so use setup:dev locally:
+cd fum_automation
 npm run setup:dev
 
 # Copy environment template — one file per chain
@@ -86,8 +89,6 @@ These are needed for production startup, full integration testing (`npm run star
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DEBUG` | `false` | Enable verbose logging |
-| `BLACKLIST_PATH` | `./data/.vault-blacklist.json` | Path to vault blacklist file |
-| `TRACKING_DATA_DIR` | `./data/vaults` | Directory for vault tracking data |
 | `TELEGRAM_BOT_API_KEY` | - | Telegram bot API key for notifications |
 | `TELEGRAM_CHAT_ID` | - | Telegram chat ID for notifications |
 | `FORK_CHAIN` | `arbitrum` | Chain to fork for tests (`arbitrum` or `avalanche`) |
