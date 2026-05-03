@@ -18,8 +18,8 @@ npx hardhat test --grep "pattern"  # Run specific tests
 ## From the fum Project
 
 ```bash
-cd ../fum && npm run contracts:test           # Sync + run all Hardhat tests
-cd ../fum && npm run contracts:test:coverage  # Sync + run coverage
+cd fum && npm run contracts:test           # Sync + run all Hardhat tests
+cd fum && npm run contracts:test:coverage  # Sync + run coverage
 ```
 
 Prefer these when you've just edited a contract in `fum/contracts/` — they guarantee the synced copy here matches the source of truth before running.
@@ -29,7 +29,7 @@ Prefer these when you've just edited a contract in `fum/contracts/` — they gua
 Contracts in this project are **copies** synced from `fum/contracts/`. The source of truth is always `fum/contracts/`. To update contracts here:
 
 ```bash
-cd ../fum && npm run contracts:sync
+cd fum && npm run contracts:sync
 ```
 
 ## Test Structure

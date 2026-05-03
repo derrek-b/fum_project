@@ -3,6 +3,8 @@
 Unit tests for the FUM smart contracts. FUM is a DeFi liquidity management platform; this project provides Hardhat-based test coverage for the vault system, strategies, validators, and supporting contracts.
 
 > `fum_testing` is one subproject in the [fum_project monorepo](../README.md). The root README has the big-picture architecture and sibling-project overview; this doc covers `fum_testing` specifically.
+>
+> **Working directory.** All commands and paths in this doc assume you're at the monorepo root (`fum_project/`). See [Monorepo Conventions](../README.md#monorepo-conventions) for details.
 
 ## Overview
 
@@ -58,7 +60,7 @@ No environment variables required — tests are fully self-contained.
 The Solidity files in `contracts/` are copies synced from `fum/contracts/`, which is the source of truth. To propagate contract changes into this project:
 
 ```bash
-cd ../fum && npm run contracts:sync
+cd fum && npm run contracts:sync
 ```
 
 ## Running Tests
@@ -81,8 +83,8 @@ npx hardhat test test/unit/PositionVault.test.js
 ### From the Monorepo Root
 
 ```bash
-cd ../fum && npm run contracts:test           # Sync contracts then run all tests
-cd ../fum && npm run contracts:test:coverage  # Sync contracts then run coverage
+cd fum && npm run contracts:test           # Sync contracts then run all tests
+cd fum && npm run contracts:test:coverage  # Sync contracts then run coverage
 ```
 
 Prefer these when you've edited contracts in `../fum/contracts/` — they avoid a stale-sync gotcha.
