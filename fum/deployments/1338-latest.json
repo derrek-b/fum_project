@@ -1,17 +1,17 @@
 {
   "version": "0.2.1",
-  "timestamp": "2026-04-14T21-55-26",
+  "timestamp": "2026-05-02T22-27-47",
   "network": {
     "name": "avalanche",
     "chainId": 1338
   },
   "contracts": {
-    "VaultFactory": "0x633a7eB9b8912b22f3616013F3153de687F96074",
-    "BabyStepsStrategy": "0x1E53bea57Dd5dDa7bFf1a1180a2f64a5c9e222f5",
-    "TJPositionProxy": "0x27f7785b17c6B4d034094a1B16Bc928bD697f386",
-    "TJPositionManager": "0x17f4B55A352Be71CC03856765Ad04147119Aa09B",
-    "TJPositionValidator": "0x08677Af0A7F54fE2a190bb1F75DE682fe596317e",
-    "TJSwapValidator": "0xa7480B62a657555f6727bCdb96953bCC211FFbaC"
+    "VaultFactory": "0x8797847c9d63D8Ed9C30B058F408d4257A33B76C",
+    "BabyStepsStrategy": "0xF816b7FfDa4a8aB6B68540D1993fCa98E462b3bc",
+    "TJPositionProxy": "0xa9Ea7F91E63896d852c4FCA6124c974adC68Af3B",
+    "TJPositionManager": "0xDB259fa7d7f9F68aE3ffC3c748516ba9567a7576",
+    "TJPositionValidator": "0x71d75C9A9e1a4fFa5a16556b51D6e630A4FA902A",
+    "TJSwapValidator": "0x2D6E6A6430F0121d6949D743DF54730b40C5c74F"
   },
   "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 }

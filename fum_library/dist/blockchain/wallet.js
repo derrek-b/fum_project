@@ -25,14 +25,7 @@ import { getChainConfig } from "../helpers/chainHelpers.js";
  */
 export async function createWeb3Provider() {
   if (typeof window !== "undefined" && window.ethereum) {
-    const provider = new ethers.providers.Web3Provider(window.ethereum);
-
-    // Validate provider instance
-    if (!(provider instanceof ethers.providers.Web3Provider)) {
-      throw new Error('Failed to create valid Web3Provider instance');
-    }
-
-    return provider;
+    return new ethers.providers.Web3Provider(window.ethereum);
   }
   throw new Error("No Ethereum provider found (e.g., MetaMask) in browser");
 }
@@ -66,11 +59,6 @@ export async function createJsonRpcProvider(rpcUrl) {
   }
 
   const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
-
-  // Validate provider instance
-  if (!(provider instanceof ethers.providers.JsonRpcProvider)) {
-    throw new Error('Failed to create valid JsonRpcProvider instance');
-  }
 
   // Test connectivity with retry
   let retries = 2;
@@ -243,27 +231,23 @@ export async function switchChain(provider, chainId) {
   } catch (err) {
     // Error code 4902 means the chain hasn't been added to wallet
     if (err.code === 4902) {
-      // Try to add the chain if we have it in our configs
+      // getChainConfig throws for unsupported chains — let that propagate
+      // (switchChain callers get "Chain X is not supported" for unknown chains)
       const chainConfig = getChainConfig(chainId);
-      if (chainConfig) {
-        try {
-          await provider.send("wallet_addEthereumChain", [{
-            chainId: chainIdHex,
-            chainName: chainConfig.name,
-            nativeCurrency: chainConfig.nativeCurrency,
-            rpcUrls: chainConfig.rpcUrls,
-            blockExplorerUrls: chainConfig.blockExplorerUrls
-          }]);
-          
-          // Chain added successfully, now try switching again
-          await provider.send("wallet_switchEthereumChain", [{ chainId: chainIdHex }]);
-          return true;
-        } catch (addError) {
-          console.error("Failed to add chain:", addError);
-          return false;
-        }
-      } else {
-        console.warn(`Chain ${chainId} not found in library configs`);
+      try {
+        await provider.send("wallet_addEthereumChain", [{
+          chainId: chainIdHex,
+          chainName: chainConfig.name,
+          nativeCurrency: chainConfig.nativeCurrency,
+          rpcUrls: chainConfig.rpcUrls,
+          blockExplorerUrls: chainConfig.blockExplorerUrls
+        }]);
+
+        // Chain added successfully, now try switching again
+        await provider.send("wallet_switchEthereumChain", [{ chainId: chainIdHex }]);
+        return true;
+      } catch (addError) {
+        console.error("Failed to add chain:", addError);
         return false;
       }
     }

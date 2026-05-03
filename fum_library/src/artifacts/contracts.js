@@ -1,6 +1,6 @@
 // src/artifacts/contracts.js
       /**
-       * Contract ABIs and addresses for the FUM project
+       * Contract ABIs and addresses for the F.U.M. project
        * This file is auto-generated and should not be edited directly
        */
 
@@ -710,8 +710,8 @@
       }
     ],
     "addresses": {
-      "1337": "0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C",
-      "1338": "0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C",
+      "1337": "0xA7aeb0176680297E8004c2350fbef75E1C9646Cd",
+      "1338": "0xF816b7FfDa4a8aB6B68540D1993fCa98E462b3bc",
       "42161": "0xeAdA21fc37F548d4813b74C9f0a2eA66ff9fef27"
     }
   },
@@ -2342,8 +2342,8 @@
       }
     ],
     "addresses": {
-      "1337": "0xa9672a817618Ae03A8A342d004e3b53f50798948",
-      "1338": "0xa9672a817618Ae03A8A342d004e3b53f50798948",
+      "1337": "0x0A283CDF71cA71f64b9784448976B76da2b1B78B",
+      "1338": "0x8797847c9d63D8Ed9C30B058F408d4257A33B76C",
       "42161": "0x31709a06fB0B7DAe79B35f94cDc9D74FB348103B"
     }
   },
@@ -3065,7 +3065,7 @@
     ],
     "addresses": {
       "1337": "0x13B15CCD923853eB9322C3aBBb91b7A93E3a8B6e",
-      "1338": "0xCBd482597a26c0255a5F38B3360bE2015D628187"
+      "1338": "0xDB259fa7d7f9F68aE3ffC3c748516ba9567a7576"
     }
   },
   "TJPositionProxy": {
@@ -3242,7 +3242,7 @@
       }
     ],
     "addresses": {
-      "1337": "0x4a6082b952A59d7EE61926ee935e34DC023e7C23"
+      "1337": "0x9737C4C261C20F7CcCD0Bb16a368922c2F72F6C4"
     }
   },
   "UniswapV3PositionValidator": {
@@ -3339,7 +3339,7 @@
       }
     ],
     "addresses": {
-      "1337": "0xa062C91fa437ea27587cB6888ecBB85cA82e816B"
+      "1337": "0x07b8C761A4230ACb63829fB6Af1A2C2d52b9Cf04"
     }
   },
   "UniswapV4PositionValidator": {
@@ -3436,7 +3436,7 @@
       }
     ],
     "addresses": {
-      "1337": "0x636Dd917ea284896D45c62Ee0462EF42c509110A"
+      "1337": "0x916Db2bBA373556ABD96e2174aE4EE55416e70d9"
     }
   },
   "TJPositionValidator": {
@@ -3534,7 +3534,7 @@
     ],
     "addresses": {
       "1337": "0x27998b19Ea0fcedDBa50915dE46692Ccef961e17",
-      "1338": "0x88EE5050eBA44e68A0146e830d6E08aBda453f21"
+      "1338": "0x71d75C9A9e1a4fFa5a16556b51D6e630A4FA902A"
     }
   },
   "TJSwapValidator": {
@@ -3559,7 +3559,7 @@
       }
     ],
     "addresses": {
-      "1338": "0xC89EEc2129aBAC411BB422482f184CD252C7721f"
+      "1338": "0x2D6E6A6430F0121d6949D743DF54730b40C5c74F"
     }
   },
   "MerklIncentiveValidator": {
