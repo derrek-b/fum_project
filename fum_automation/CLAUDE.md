@@ -15,6 +15,7 @@ npm run test:v4            # Uniswap V4 workflow tests (FORK_CHAIN=arbitrum)
 npm run test:arb           # Run specific V3 or V4 workflow file (vitest run <path>)
 npm run test:tj            # All Trader Joe V2.2 workflow tests (FORK_CHAIN=avalanche)
 npm run test:av            # Run specific TJ test file (FORK_CHAIN=avalanche vitest run <path>)
+npm run reset-data         # Wipe data/vaults + reset blacklist/trackingFailures (between integration sessions)
 ```
 
 **Backtesting:**
