@@ -1,6 +1,6 @@
-// src/artifacts/contracts.js
+// artifacts/contracts.js
       /**
-       * Contract ABIs and addresses for the F.U.M. project
+       * Contract ABIs and addresses for the FUM project
        * This file is auto-generated and should not be edited directly
        */
 
@@ -712,7 +712,7 @@
     "addresses": {
       "1337": "0xA7aeb0176680297E8004c2350fbef75E1C9646Cd",
       "1338": "0xF816b7FfDa4a8aB6B68540D1993fCa98E462b3bc",
-      "42161": "0xeAdA21fc37F548d4813b74C9f0a2eA66ff9fef27"
+      "42161": "0xF32D3fb50379Da1a2fe15eDC2ABc3D9213df765F"
     }
   },
   "PositionVault": {
@@ -2344,7 +2344,7 @@
     "addresses": {
       "1337": "0x0A283CDF71cA71f64b9784448976B76da2b1B78B",
       "1338": "0x8797847c9d63D8Ed9C30B058F408d4257A33B76C",
-      "42161": "0x31709a06fB0B7DAe79B35f94cDc9D74FB348103B"
+      "42161": "0x26E3413d152121C5aAfaa9936d5cBd437BB73431"
     }
   },
   "TJPositionManager": {
@@ -3242,7 +3242,8 @@
       }
     ],
     "addresses": {
-      "1337": "0x9737C4C261C20F7CcCD0Bb16a368922c2F72F6C4"
+      "1337": "0x9737C4C261C20F7CcCD0Bb16a368922c2F72F6C4",
+      "42161": "0xee74ecAa120357206d37100DcbB67E036A6C8733"
     }
   },
   "UniswapV3PositionValidator": {
@@ -3339,7 +3340,8 @@
       }
     ],
     "addresses": {
-      "1337": "0x07b8C761A4230ACb63829fB6Af1A2C2d52b9Cf04"
+      "1337": "0x07b8C761A4230ACb63829fB6Af1A2C2d52b9Cf04",
+      "42161": "0x5fA6ADa41f7ba31946360695F06c64007E77A4f4"
     }
   },
   "UniswapV4PositionValidator": {
@@ -3436,7 +3438,8 @@
       }
     ],
     "addresses": {
-      "1337": "0x916Db2bBA373556ABD96e2174aE4EE55416e70d9"
+      "1337": "0x916Db2bBA373556ABD96e2174aE4EE55416e70d9",
+      "42161": "0x61A2ccEa030572c4F6a4fE7f5fc51676B02027ad"
     }
   },
   "TJPositionValidator": {
