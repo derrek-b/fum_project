@@ -53,7 +53,9 @@ Options:
   --help, -h           Show this help message
 
 Required env vars (loaded from --env-file):
-  ALCHEMY_API_KEY      Alchemy key for the target chain's RPC URL
+  ALCHEMY_API_KEY      Alchemy key for the target chain's RPC URL.
+                       NEXT_PUBLIC_ALCHEMY_API_KEY accepted as fallback
+                       (matches the Vercel-frontend env file convention).
 
 Required env vars (pass INLINE, never in --env-file):
   ARBITRUM_DEPLOYER_PK   Deployer private key for --network=arbitrum
@@ -188,11 +190,14 @@ function getChainId(name) {
 
 function buildRpcUrl(chainConfig, chainId) {
   let rpcUrl = chainConfig.rpcUrls[0];
-  // Production chains need an Alchemy key appended.
+  // Production chains need an Alchemy key appended. Accept both the backend
+  // convention (ALCHEMY_API_KEY) and the Next.js frontend convention
+  // (NEXT_PUBLIC_ALCHEMY_API_KEY) so the same env file (e.g.
+  // .env.vercel.arbitrum) can serve both deploy and Vercel-frontend uses.
   if (chainId === 42161 || chainId === 43114) {
-    const apiKey = process.env.ALCHEMY_API_KEY;
+    const apiKey = process.env.ALCHEMY_API_KEY || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
     if (!apiKey) {
-      throw new Error('ALCHEMY_API_KEY required for production deployment (set in --env-file)');
+      throw new Error('ALCHEMY_API_KEY or NEXT_PUBLIC_ALCHEMY_API_KEY required for production deployment (set in --env-file)');
     }
     rpcUrl = `${rpcUrl}/${apiKey}`;
   }
