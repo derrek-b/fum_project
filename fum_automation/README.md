@@ -45,9 +45,8 @@ Node.js 22+ and the `fum_library` tarball installed via `npm run pack` — see t
 
 ```bash
 # Install dependencies (requires fum_library tarball to exist in fum_library sibling-project).
-# .npmrc omits dev + optional dependencies for production deployment, so use setup:dev locally:
 cd fum_automation
-npm run setup:dev
+npm install
 
 # Copy environment template — one file per chain
 cp .env.example .env.local      # Arbitrum (consumed by `npm run start`)
@@ -113,6 +112,20 @@ The service will:
 3. Load authorized vaults from the VaultFactory
 4. Start monitoring positions and events
 5. Expose SSE endpoint at `http://localhost:{SSE_PORT}/events`
+
+## Deployment
+
+Production runs in a Docker container built from the repo-root [`Dockerfile`](../Dockerfile). The build is multi-stage: it packs `fum_library` into a tarball, installs `fum_automation` production deps against it, and copies only `src/`, `scripts/`, `package.json`, and `node_modules` into the runtime image. The container runs as a non-root `node` user and starts via `node scripts/start-automation.js`.
+
+Runtime state (vaults, blacklist, tracking failures) is written to `/app/data`. Mount a persistent volume at that path so state survives redeploys, or set `DATA_DIR` to point elsewhere.
+
+Environment variables (`CHAIN_ID`, `WS_URL`, `AUTOMATION_MNEMONIC`, etc. — see [Configuration](#configuration)) must be set by the host platform; `.env.*` files are excluded from the image by `.dockerignore` and are never baked in.
+
+**Railway specifics:**
+- Builder: Dockerfile (Dockerfile Path: `Dockerfile`)
+- Root Directory: empty (build context is the repo root)
+- Watch Paths: `fum_library/**`, `fum_automation/**`, `Dockerfile`, `.dockerignore`
+- Volume mounted at `/app/data`
 
 ## Strategies
 
