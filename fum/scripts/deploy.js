@@ -1,5 +1,18 @@
 // scripts/deploy.js
-// Chain-agnostic deployment script with network-specific address tracking
+// Chain-aware production deployment: deploys core contracts, validators, and
+// any chain-specific extras (TJPositionProxy/Manager on Avalanche), registers
+// validators on VaultFactory, updates fum_library artifacts, and saves a
+// deployment record.
+//
+// Usage:
+//   node scripts/deploy.js --network=arbitrum --env-file=.env.vercel.arbitrum
+//   node scripts/deploy.js --network=avalanche --env-file=.env.vercel.avalanche
+//   node scripts/deploy.js --network=localhost
+//
+// SECURITY: pass the deployer private key INLINE only — never put it in any
+// .env file. Example:
+//   ARBITRUM_DEPLOYER_PK=0x... node scripts/deploy.js --network=arbitrum --env-file=.env.vercel.arbitrum
+
 import { ethers } from 'ethers';
 import fs from 'fs';
 import path from 'path';
@@ -8,345 +21,464 @@ import dotenv from 'dotenv';
 import { getChainConfig } from 'fum_library/helpers/chainHelpers';
 import contractData from 'fum_library/artifacts/contracts';
 
-// Load environment variables
-dotenv.config();
-
-// Setup path helpers
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Parse command line arguments
+const LIBRARY_PATH = path.resolve(__dirname, '../../fum_library');
+const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+const DEFAULT_GAS_LIMIT = 5000000;
+
+// ============================================================================
+// CLI parsing
+// ============================================================================
+
 const args = process.argv.slice(2);
-const networkArg = args.find(arg => arg.startsWith('--network='));
+const networkArg = args.find(a => a.startsWith('--network='));
+const envFileArg = args.find(a => a.startsWith('--env-file='));
+
 const networkName = networkArg ? networkArg.split('=')[1] : 'localhost';
-const contractArg = args.find(arg => arg.startsWith('--contract='));
-const contractList = contractArg ? contractArg.split('=')[1] : 'all'; // Supports: 'all', single contract, or comma-separated list
+const envFile = envFileArg ? envFileArg.split('=')[1] : '.env.local';
 
-// Available contracts for deployment
-const AVAILABLE_CONTRACTS = ['VaultFactory', 'BabyStepsStrategy'];
-
-// Help flag
 if (args.includes('--help') || args.includes('-h')) {
   console.log(`
 Usage: node scripts/deploy.js [options]
 
 Options:
   --network=<name>     Network to deploy to (default: localhost)
-                       Supported: localhost, arbitrum, mainnet, polygon, optimism, base
-  --contract=<names>   Contract(s) to deploy (default: all)
-                       Examples:
-                         --contract=all                           Deploy all contracts
-                         --contract=BabyStepsStrategy             Deploy single contract
-                         --contract=VaultFactory,BabyStepsStrategy Deploy multiple contracts
-  --list               List available contracts
+                       Supported: localhost, arbitrum, avalanche
+  --env-file=<path>    Env file to load (default: .env.local)
+                       Resolved relative to fum/.
+                       Production usage requires explicit --env-file=
+                       since the file varies per chain.
   --help, -h           Show this help message
 
-Available contracts: ${AVAILABLE_CONTRACTS.join(', ')}
+Required env vars (loaded from --env-file):
+  ALCHEMY_API_KEY      Alchemy key for the target chain's RPC URL
+
+Required env vars (pass INLINE, never in --env-file):
+  ARBITRUM_DEPLOYER_PK   Deployer private key for --network=arbitrum
+  AVALANCHE_DEPLOYER_PK  Deployer private key for --network=avalanche
+  PRIVATE_KEY            Fallback if {NETWORK}_DEPLOYER_PK is unset
 
 Examples:
+  ARBITRUM_DEPLOYER_PK=0x... node scripts/deploy.js \\
+    --network=arbitrum --env-file=.env.vercel.arbitrum
+
+  AVALANCHE_DEPLOYER_PK=0x... node scripts/deploy.js \\
+    --network=avalanche --env-file=.env.vercel.avalanche
+
   node scripts/deploy.js --network=localhost
-  node scripts/deploy.js --network=arbitrum --contract=BabyStepsStrategy
-  node scripts/deploy.js --network=arbitrum --contract=VaultFactory,BabyStepsStrategy
 `);
   process.exit(0);
 }
 
-// List flag
-if (args.includes('--list')) {
-  console.log('Available contracts for deployment:');
-  AVAILABLE_CONTRACTS.forEach(c => console.log(`  - ${c}`));
-  process.exit(0);
+if (args.some(a => a.startsWith('--contract=')) || args.includes('--list')) {
+  console.error('Error: --contract= and --list flags removed.');
+  console.error('Selective deploys produce broken state (validators not registered).');
+  console.error('Each chain deploys its full plan — see DEPLOYMENT_PLANS in scripts/deploy.js.');
+  process.exit(1);
 }
 
-// Library path for updating deployment addresses
-const LIBRARY_PATH = path.resolve(__dirname, '../../fum_library');
+// Load env file (relative to fum/)
+const envPath = path.resolve(__dirname, '..', envFile);
+const envResult = dotenv.config({ path: envPath });
+if (envResult.error && envFile !== '.env.local') {
+  // Only warn for explicit --env-file; default .env.local is allowed to be missing
+  console.error(`Failed to load env file at ${envPath}: ${envResult.error.message}`);
+  process.exit(1);
+}
 
-// Get chainId from network name
-function getChainId(networkName) {
-  // Common network name to chainId mappings
-  const networkMap = {
-    'localhost': 1337,
-    'mainnet': 1,
-    'ethereum': 1,
-    'arbitrum': 42161,
-    'polygon': 137,
-    'optimism': 10,
-    'base': 8453,
+// ============================================================================
+// Deployment plans (per chain)
+// ============================================================================
+
+const DEPLOYMENT_PLANS = {
+  // Arbitrum One
+  42161: {
+    coreContracts: [
+      { name: 'VaultFactory', getConstructorArgs: (deployer) => [deployer, PERMIT2_ADDRESS] },
+      { name: 'BabyStepsStrategy' },
+    ],
+    extraContracts: [],
+    validators: [
+      {
+        name: 'UniversalRouterValidator',
+        registerVia: 'setSwapValidator',
+        getTargetAddress: (cfg) => cfg.platformAddresses.uniswapV3.universalRouterAddress,
+        targetLabel: 'UniversalRouter',
+      },
+      {
+        name: 'UniswapV3PositionValidator',
+        registerVia: 'setLiquidityValidator',
+        getTargetAddress: (cfg) => cfg.platformAddresses.uniswapV3.positionManagerAddress,
+        targetLabel: 'V3 PositionManager',
+      },
+      {
+        name: 'UniswapV4PositionValidator',
+        registerVia: 'setLiquidityValidator',
+        getTargetAddress: (cfg) => cfg.platformAddresses.uniswapV4.positionManagerAddress,
+        targetLabel: 'V4 PositionManager',
+      },
+    ],
+    postDeployHooks: [],
+  },
+
+  // Avalanche C-Chain
+  43114: {
+    coreContracts: [
+      { name: 'VaultFactory', getConstructorArgs: (deployer) => [deployer, PERMIT2_ADDRESS] },
+      { name: 'BabyStepsStrategy' },
+    ],
+    extraContracts: [
+      { name: 'TJPositionProxy' },
+      {
+        name: 'TJPositionManager',
+        getConstructorArgs: (deployer, deployed, cfg) => [
+          cfg.platformAddresses.traderjoeV2_2.lbRouterAddress,
+          deployed.TJPositionProxy,
+        ],
+      },
+    ],
+    validators: [
+      {
+        name: 'TJPositionValidator',
+        registerVia: 'setLiquidityValidator',
+        getTargetAddress: (cfg, deployed) => deployed.TJPositionManager,
+        targetLabel: 'TJPositionManager',
+      },
+      {
+        name: 'TJSwapValidator',
+        registerVia: 'setSwapValidator',
+        getTargetAddress: (cfg) => cfg.platformAddresses.traderjoeV2_2.lbRouterAddress,
+        targetLabel: 'LBRouter',
+      },
+    ],
+    postDeployHooks: [
+      // TJ adapter reads positionManagerAddress from chains.js at runtime,
+      // so the freshly deployed TJPositionManager address must be written back.
+      // Mirrors start-hardhat-avalanche.js:275.
+      {
+        kind: 'updateChainsConfig',
+        platform: 'traderjoeV2_2',
+        property: 'positionManagerAddress',
+        sourceContract: 'TJPositionManager',
+      },
+    ],
+  },
+};
+
+// Localhost (1337) reuses the Arbitrum plan (Arbitrum mainnet fork).
+DEPLOYMENT_PLANS[1337] = DEPLOYMENT_PLANS[42161];
+// Localhost-AV (1338) reuses the Avalanche plan.
+DEPLOYMENT_PLANS[1338] = DEPLOYMENT_PLANS[43114];
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function getChainId(name) {
+  const map = {
+    localhost: 1337,
+    'localhost-av': 1338,
+    arbitrum: 42161,
+    avalanche: 43114,
   };
-
-  return networkMap[networkName] || parseInt(networkName, 10);
+  return map[name] || parseInt(name, 10);
 }
 
-// Get the appropriate private key based on network
+function buildRpcUrl(chainConfig, chainId) {
+  let rpcUrl = chainConfig.rpcUrls[0];
+  // Production chains need an Alchemy key appended.
+  if (chainId === 42161 || chainId === 43114) {
+    const apiKey = process.env.ALCHEMY_API_KEY;
+    if (!apiKey) {
+      throw new Error('ALCHEMY_API_KEY required for production deployment (set in --env-file)');
+    }
+    rpcUrl = `${rpcUrl}/${apiKey}`;
+  }
+  return rpcUrl;
+}
+
+// SECURITY: this reads the deployer PK from an env var. The PK MUST be
+// passed inline at the command (e.g. ARBITRUM_DEPLOYER_PK=0x... node ...)
+// and never committed to any .env file.
 function getPrivateKey(chainId, networkName) {
-  // Use Hardhat default account #0 for localhost
-  if (chainId === 1337) {
-    return '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'; // Hardhat account #0
+  if (chainId === 1337 || chainId === 1338) {
+    // Hardhat default account #0 — well-known test key, safe to hardcode
+    return '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
   }
-
-  // Derive env var name from network name (e.g., 'arbitrum' -> 'ARBITRUM_DEPLOYER_PK')
   const envVarName = `${networkName.toUpperCase()}_DEPLOYER_PK`;
-  const privateKey = process.env[envVarName] || process.env.PRIVATE_KEY;
-
-  if (!privateKey) {
-    throw new Error(`No private key found for network ${networkName}. Set ${envVarName} or PRIVATE_KEY environment variable.`);
+  const pk = process.env[envVarName] || process.env.PRIVATE_KEY;
+  if (!pk) {
+    throw new Error(
+      `No private key found for ${networkName}. ` +
+      `Pass ${envVarName} INLINE (do not store in --env-file): ` +
+      `${envVarName}=0x... node scripts/deploy.js --network=${networkName}`
+    );
   }
-
-  return privateKey;
+  return pk;
 }
 
-/**
- * Update the library's contracts.js files with new deployment addresses
- * @param {Object} deploymentResults - Object mapping contract names to addresses
- * @param {number} chainId - The chain ID for the deployment
- */
-function updateLibraryAddresses(deploymentResults, chainId) {
-  try {
-    console.log('\nUpdating library with new deployment addresses...');
+function readBytecode(name) {
+  const bytecodePath = path.join(__dirname, `../bytecode/${name}.bin`);
+  if (!fs.existsSync(bytecodePath)) {
+    throw new Error(`Bytecode file not found at ${bytecodePath}. Run extract-bytecode first.`);
+  }
+  return '0x' + fs.readFileSync(bytecodePath, 'utf8').trim();
+}
 
-    // Define paths for both src and dist versions
-    const srcContractsPath = path.join(LIBRARY_PATH, 'src/artifacts/contracts.js');
-    const distContractsPath = path.join(LIBRARY_PATH, 'dist/artifacts/contracts.js');
+// Maps deployment name to the key used in fum_library/artifacts/contracts.js.
+// BabyStepsStrategy is keyed as "bob" historically; everything else uses its
+// own name. Keep this here (not in the plan map) so the plan stays declarative.
+function libraryKeyFor(deploymentName) {
+  return deploymentName === 'BabyStepsStrategy' ? 'bob' : deploymentName;
+}
 
-    // Check if the src file exists and read it
-    if (!fs.existsSync(srcContractsPath)) {
-      console.warn(`Library contracts file not found at ${srcContractsPath}, skipping address update`);
-      return false;
+function getAbi(contractsData, deploymentName) {
+  const key = libraryKeyFor(deploymentName);
+  const abi = contractsData[key]?.abi;
+  if (!abi || abi.length === 0) {
+    throw new Error(`ABI not found in fum_library artifacts for ${deploymentName} (key: ${key})`);
+  }
+  return abi;
+}
+
+async function deployOne(name, abi, bytecode, wallet, constructorArgs = []) {
+  console.log(`\nDeploying ${name}...`);
+  if (constructorArgs.length > 0) {
+    console.log(`  Constructor args: ${JSON.stringify(constructorArgs)}`);
+  }
+  const factory = new ethers.ContractFactory(abi, bytecode, wallet);
+  const contract = await factory.deploy(...constructorArgs, { gasLimit: DEFAULT_GAS_LIMIT });
+  console.log(`  Tx hash: ${contract.deployTransaction.hash}`);
+  await contract.deployed();
+  console.log(`  ${name} deployed to: ${contract.address}`);
+  return contract.address;
+}
+
+async function registerValidators(factoryContract, validators, deployed, chainConfig) {
+  if (validators.length === 0) return;
+  console.log('\nRegistering validators on VaultFactory...');
+  for (const v of validators) {
+    const validatorAddress = deployed[v.name];
+    if (!validatorAddress) {
+      throw new Error(`Cannot register ${v.name} — not in deployed map`);
     }
-
-    // Read and parse the existing contracts
-    const fileContent = fs.readFileSync(srcContractsPath, 'utf8');
-    const contractsMatch = fileContent.match(/const contracts = ([\s\S]*?);[\s\S]*export default contracts/);
-
-    if (!contractsMatch || !contractsMatch[1]) {
-      console.warn('Could not parse existing contracts file, skipping address update');
-      return false;
+    const targetAddress = v.getTargetAddress(chainConfig, deployed);
+    if (!targetAddress) {
+      throw new Error(`Cannot register ${v.name} — target address (${v.targetLabel}) is missing from chain config`);
     }
+    const tx = await factoryContract[v.registerVia](targetAddress, validatorAddress);
+    await tx.wait();
+    console.log(`  Registered ${v.name} via ${v.registerVia}(${v.targetLabel}=${targetAddress})`);
+  }
+}
 
-    let existingContracts;
-    try {
-      existingContracts = eval(`(${contractsMatch[1]})`);
-    } catch (e) {
-      console.warn(`Could not evaluate contracts object: ${e.message}`);
-      return false;
+// Inline rewrite of chains.js to pin a freshly-deployed address onto the
+// runtime chain config. Used by the Avalanche post-deploy hook so the TJ
+// adapter can find TJPositionManager at runtime. Mirrors the same helper
+// in start-hardhat-avalanche.js:60.
+function updateChainsConfig(chainId, platformId, key, value) {
+  const files = [
+    path.join(LIBRARY_PATH, 'src/configs/chains.js'),
+    path.join(LIBRARY_PATH, 'dist/configs/chains.js'),
+  ];
+  for (const filePath of files) {
+    if (!fs.existsSync(filePath)) continue;
+    let content = fs.readFileSync(filePath, 'utf8');
+    const pattern = new RegExp(
+      `(${chainId}:\\s*\\{[\\s\\S]*?${platformId}:\\s*\\{[\\s\\S]*?${key}:\\s*)"[^"]*"`
+    );
+    if (pattern.test(content)) {
+      content = content.replace(pattern, `$1"${value}"`);
+      fs.writeFileSync(filePath, content);
+      console.log(`  Updated ${platformId}.${key} for chain ${chainId} in ${path.basename(filePath)}: ${value}`);
     }
+  }
+}
 
-    // Map deployment result names to library contract names
-    const contractNameMapping = {
-      'BabyStepsStrategy': 'bob',
-      'VaultFactory': 'VaultFactory',
-      'PositionVault': 'PositionVault'
-    };
-
-    // Update addresses for deployed contracts
-    let updatedCount = 0;
-    for (const [deployedName, address] of Object.entries(deploymentResults)) {
-      const libraryName = contractNameMapping[deployedName] || deployedName;
-
-      if (existingContracts[libraryName]) {
-        // Initialize addresses object if it doesn't exist
-        if (!existingContracts[libraryName].addresses) {
-          existingContracts[libraryName].addresses = {};
-        }
-
-        // Update the address for this chain
-        existingContracts[libraryName].addresses[chainId.toString()] = address;
-        console.log(`  ✅ Updated ${libraryName} address for chain ${chainId}: ${address}`);
-        updatedCount++;
-      } else {
-        console.warn(`  ⚠️ Contract ${libraryName} not found in library, skipping`);
+function runPostDeployHooks(plan, deployed, chainId) {
+  if (plan.postDeployHooks.length === 0) return;
+  console.log('\nRunning post-deploy hooks...');
+  for (const hook of plan.postDeployHooks) {
+    if (hook.kind === 'updateChainsConfig') {
+      const value = deployed[hook.sourceContract];
+      if (!value) {
+        throw new Error(`Post-deploy hook needs ${hook.sourceContract} address but it's not deployed`);
       }
+      updateChainsConfig(chainId, hook.platform, hook.property, value);
+    } else {
+      throw new Error(`Unknown post-deploy hook kind: ${hook.kind}`);
     }
+  }
+}
 
-    // Generate the updated file content
-    const contractsContent = `// artifacts/contracts.js
+function updateLibraryAddresses(deployed, chainId) {
+  console.log('\nUpdating fum_library artifacts...');
+  const srcPath = path.join(LIBRARY_PATH, 'src/artifacts/contracts.js');
+  const distPath = path.join(LIBRARY_PATH, 'dist/artifacts/contracts.js');
+
+  if (!fs.existsSync(srcPath)) {
+    console.warn(`  fum_library contracts.js not found at ${srcPath} — skipping`);
+    return;
+  }
+
+  const fileContent = fs.readFileSync(srcPath, 'utf8');
+  const match = fileContent.match(/const contracts = ([\s\S]*?);[\s\S]*export default contracts/);
+  if (!match) {
+    throw new Error('Could not parse fum_library/src/artifacts/contracts.js');
+  }
+  const existing = eval(`(${match[1]})`); // eslint-disable-line no-eval
+
+  for (const [name, address] of Object.entries(deployed)) {
+    const key = libraryKeyFor(name);
+    if (!existing[key]) {
+      console.warn(`  ${key} not in artifacts — skipping (run extract-abis to regenerate)`);
+      continue;
+    }
+    if (!existing[key].addresses) existing[key].addresses = {};
+    existing[key].addresses[chainId.toString()] = address;
+    console.log(`  ${key}.addresses[${chainId}] = ${address}`);
+  }
+
+  const out = `// artifacts/contracts.js
       /**
        * Contract ABIs and addresses for the FUM project
        * This file is auto-generated and should not be edited directly
        */
 
       // Contract ABIs and addresses
-      const contracts = ${JSON.stringify(existingContracts, null, 2)};
+      const contracts = ${JSON.stringify(existing, null, 2)};
 
       export default contracts;`;
 
-    // Write to both src and dist
-    fs.writeFileSync(srcContractsPath, contractsContent);
-    console.log(`  📝 Updated ${srcContractsPath}`);
+  fs.writeFileSync(srcPath, out);
+  fs.writeFileSync(distPath, out);
+  console.log(`  Wrote ${srcPath}`);
+  console.log(`  Wrote ${distPath}`);
+}
 
-    fs.writeFileSync(distContractsPath, contractsContent);
-    console.log(`  📝 Updated ${distContractsPath}`);
+function saveDeploymentRecord(deployed, chainId, networkConfig, deployer, partial = false) {
+  const timestamp = new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '');
+  const record = {
+    version: '2.0.0',
+    timestamp,
+    network: { name: networkConfig.name, chainId },
+    contracts: deployed,
+    deployer,
+  };
 
-    console.log(`✅ Library addresses updated (${updatedCount} contracts)\n`);
-    return true;
-  } catch (error) {
-    console.warn(`⚠️ Could not update library addresses: ${error.message}`);
-    return false;
+  const deploymentsDir = path.join(__dirname, '../deployments');
+  if (!fs.existsSync(deploymentsDir)) fs.mkdirSync(deploymentsDir, { recursive: true });
+
+  const suffix = partial ? '-PARTIAL' : '';
+  const recordPath = path.join(deploymentsDir, `${chainId}-${timestamp}${suffix}.json`);
+  fs.writeFileSync(recordPath, JSON.stringify(record, null, 2));
+  console.log(`\nDeployment record: ${recordPath}`);
+
+  // Only update {chainId}-latest.json for full successful deploys; we don't
+  // want a partial deploy to become "latest" and silently break consumers.
+  if (!partial) {
+    const latestPath = path.join(deploymentsDir, `${chainId}-latest.json`);
+    fs.writeFileSync(latestPath, JSON.stringify(record, null, 2));
+    console.log(`Latest pointer:    ${latestPath}`);
   }
 }
+
+// ============================================================================
+// Main
+// ============================================================================
 
 async function deploy() {
-  // Get network details
   const chainId = getChainId(networkName);
-  const networkConfig = getChainConfig(chainId);
-
-  if (!networkConfig) {
-    throw new Error(`Network with chainId ${chainId} not configured`);
+  const plan = DEPLOYMENT_PLANS[chainId];
+  if (!plan) {
+    throw new Error(`No deployment plan for chainId ${chainId} (network: ${networkName})`);
+  }
+  const chainConfig = getChainConfig(chainId);
+  if (!chainConfig) {
+    throw new Error(`No chain config for chainId ${chainId}`);
   }
 
-  console.log(`Deploying to ${networkConfig.name} (${chainId})...`);
+  console.log(`Deploying to ${chainConfig.name} (chainId ${chainId})`);
+  console.log(`Env file: ${envPath}`);
 
-  // Build RPC URL - append API key for chains that need it
-  let rpcUrl = networkConfig.rpcUrls[0];
-  if (chainId === 42161) {
-    const apiKey = process.env.ALCHEMY_API_KEY;
-    if (!apiKey) {
-      throw new Error('ALCHEMY_API_KEY required for Arbitrum deployment');
-    }
-    rpcUrl = `${rpcUrl}/${apiKey}`;
-  }
-
-  // Connect to provider
+  const rpcUrl = buildRpcUrl(chainConfig, chainId);
   const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
-
-  // Get private key and create wallet
   const privateKey = getPrivateKey(chainId, networkName);
   const wallet = new ethers.Wallet(privateKey, provider);
-  console.log(`Deploying with account: ${wallet.address}`);
 
-  // Check wallet balance
+  console.log(`Deployer:  ${wallet.address}`);
   const balance = await provider.getBalance(wallet.address);
-  console.log(`Account balance: ${ethers.utils.formatEther(balance)} ETH`);
+  console.log(`Balance:   ${ethers.utils.formatEther(balance)} ${chainConfig.nativeCurrency?.symbol || 'native'}`);
 
-  // Make a local copy of the contract data to avoid modifying the imported version
-  const contractsDataCopy = JSON.parse(JSON.stringify(contractData));
+  const contractsData = JSON.parse(JSON.stringify(contractData));
+  const deployed = {}; // { contractName: address }
 
-  // Deployment results to track what was deployed
-  const deploymentResults = {};
-
-  // Define a function to deploy a single contract
-  const deployContract = async (contractName) => {
-    console.log(`\nDeploying ${contractName}...`);
-
-    // For deployment, we need bytecode - extract it from your test environment
-    const bytecodePath = path.join(__dirname, `../bytecode/${contractName}.bin`);
-
-    if (!fs.existsSync(bytecodePath)) {
-      throw new Error(`Bytecode file not found at ${bytecodePath}. Please extract bytecode from your test environment first.`);
+  try {
+    // 1. Core contracts (VaultFactory, BabyStepsStrategy)
+    for (const c of plan.coreContracts) {
+      const abi = getAbi(contractsData, c.name);
+      const bytecode = readBytecode(c.name);
+      const args = c.getConstructorArgs ? c.getConstructorArgs(wallet.address, deployed, chainConfig) : [];
+      deployed[c.name] = await deployOne(c.name, abi, bytecode, wallet, args);
     }
 
-    const bytecode = '0x' + fs.readFileSync(bytecodePath, 'utf8').trim();
-
-    // Look for existing ABI
-    let abi = [];
-    if (contractName === 'BabyStepsStrategy') {
-      abi = contractsDataCopy['bob']?.abi || [];
-    } else {
-      abi = contractsDataCopy[contractName]?.abi || [];
+    // 2. Extra contracts (TJPositionProxy, TJPositionManager on Avalanche)
+    for (const c of plan.extraContracts) {
+      const abi = getAbi(contractsData, c.name);
+      const bytecode = readBytecode(c.name);
+      const args = c.getConstructorArgs ? c.getConstructorArgs(wallet.address, deployed, chainConfig) : [];
+      deployed[c.name] = await deployOne(c.name, abi, bytecode, wallet, args);
     }
 
-    if (abi.length === 0) {
-      console.warn(`No ABI found for ${contractName}, using empty array`);
+    // 3. Validators
+    for (const v of plan.validators) {
+      const abi = getAbi(contractsData, v.name);
+      const bytecode = readBytecode(v.name);
+      deployed[v.name] = await deployOne(v.name, abi, bytecode, wallet, []);
     }
 
-    // Deploy the contract
-    const factory = new ethers.ContractFactory(abi, bytecode, wallet);
+    // 4. Register validators on VaultFactory
+    const factoryContract = new ethers.Contract(
+      deployed.VaultFactory,
+      contractsData.VaultFactory.abi,
+      wallet
+    );
+    await registerValidators(factoryContract, plan.validators, deployed, chainConfig);
 
-    // Check if the contract has constructor parameters
-    let contract;
-    if (contractName === "VaultFactory") {
-      // Permit2 canonical address - same on all chains
-      const permit2Address = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+    // 5. Post-deploy hooks (e.g., write TJPositionManager back to chains.js)
+    runPostDeployHooks(plan, deployed, chainId);
 
-      // Deploy with owner and Permit2 address
-      console.log(`Using Permit2: ${permit2Address}`);
-      contract = await factory.deploy(
-        wallet.address,
-        permit2Address
-      );
-    } else {
-      // No constructor parameters for other contracts
-      contract = await factory.deploy();
+    // 6. Update fum_library artifacts
+    updateLibraryAddresses(deployed, chainId);
+
+    // 7. Save deployment record (full)
+    saveDeploymentRecord(deployed, chainId, chainConfig, wallet.address, false);
+
+    console.log('\n✅ Deployment complete.');
+    console.log('\nNext steps:');
+    console.log('  1. cd fum_library && npm run pack');
+    console.log('     (propagates new addresses to fum_automation tarball)');
+    console.log('  2. Commit fum_library/{src,dist}/artifacts/contracts.js + fum/deployments/');
+    console.log('  3. Push → Railway rebuilds the automation service');
+  } catch (error) {
+    // Save what we managed to deploy as a PARTIAL record so the user can
+    // recover/investigate. Do NOT update -latest pointer or library artifacts.
+    if (Object.keys(deployed).length > 0) {
+      console.error('\n❌ Deployment failed mid-flight. Saving partial record.');
+      console.error(`Deployed before failure: ${Object.keys(deployed).join(', ')}`);
+      try {
+        saveDeploymentRecord(deployed, chainId, chainConfig, wallet.address, true);
+      } catch (saveErr) {
+        console.error(`Failed to save partial record: ${saveErr.message}`);
+      }
     }
-
-    console.log(`Transaction hash: ${contract.deployTransaction.hash}`);
-
-    // Wait for deployment to complete
-    console.log('Waiting for deployment to be confirmed...');
-    await contract.deployTransaction.wait();
-
-    const contractAddress = contract.address;
-    console.log(`${contractName} deployed to: ${contractAddress}`);
-
-    // Save results for deployment info
-    deploymentResults[contractName] = contractAddress;
-
-    return contractAddress;
-  };
-
-  // Determine which contracts to deploy
-  let contractsToDeploy = [];
-  if (contractList === 'all') {
-    // Deploy all contracts
-    contractsToDeploy = [...AVAILABLE_CONTRACTS];
-  } else {
-    // Parse comma-separated list
-    contractsToDeploy = contractList.split(',').map(c => c.trim());
-
-    // Validate all requested contracts exist
-    const invalidContracts = contractsToDeploy.filter(c => !AVAILABLE_CONTRACTS.includes(c));
-    if (invalidContracts.length > 0) {
-      throw new Error(`Unknown contract(s): ${invalidContracts.join(', ')}. Available: ${AVAILABLE_CONTRACTS.join(', ')}`);
-    }
+    throw error;
   }
-
-  console.log(`\nContracts to deploy: ${contractsToDeploy.join(', ')}\n`);
-
-  // Deploy each contract
-  for (const contract of contractsToDeploy) {
-    await deployContract(contract);
-  }
-
-  // Save deployment info to deployments directory
-  const timestamp = new Date().toISOString().replace(/:/g, "-").replace(/\..+/, "");
-  const deploymentInfo = {
-    version: "0.2.1",
-    timestamp,
-    network: {
-      name: networkConfig.name,
-      chainId
-    },
-    contracts: deploymentResults,
-    deployer: wallet.address
-  };
-
-  console.log('Saving deployment info...')
-
-  // Create deployments directory if it doesn't exist
-  const deploymentsDir = path.join(__dirname, '../deployments');
-  if (!fs.existsSync(deploymentsDir)) {
-    fs.mkdirSync(deploymentsDir, { recursive: true });
-  }
-
-  // Save deployment info
-  const deploymentPath = path.join(deploymentsDir, `${chainId}-${timestamp}.json`);
-  fs.writeFileSync(deploymentPath, JSON.stringify(deploymentInfo, null, 2));
-
-  // Also save as latest deployment for this network (except for mainnet)
-  if(chainId !== 1) {
-    const latestPath = path.join(deploymentsDir, `${chainId}-latest.json`);
-    fs.writeFileSync(latestPath, JSON.stringify(deploymentInfo, null, 2));
-    console.log(`Deployment info saved to deployments/${chainId}-latest.json`);
-  }
-
-  // Update library with new deployment addresses
-  updateLibraryAddresses(deploymentResults, chainId);
-
-  console.log('Deployment completed successfully!');
 }
 
-// Execute deployment
-deploy().catch(error => {
-  console.error('Deployment failed:', error);
+deploy().catch((error) => {
+  console.error('\nDeployment failed:', error);
   process.exit(1);
 });
