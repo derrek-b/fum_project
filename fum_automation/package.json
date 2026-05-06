@@ -40,6 +40,7 @@
     "@uniswap/v3-periphery": "^1.4.4",
     "@uniswap/v3-sdk": "3.29.1",
     "axios": "^1.9.0",
+    "dotenv": "^16.5.0",
     "ethers": "^5.7.2",
     "fum_library": "file:../fum_library/fum_library-2.0.0.tgz",
     "jsbi": "^3.2.5",
@@ -53,7 +54,6 @@
   "devDependencies": {
     "@openzeppelin/contracts": "^5.3.0",
     "@vitest/coverage-v8": "^1.2.2",
-    "dotenv": "^16.5.0",
     "hardhat": "^2.22.19",
     "vitest": "^1.2.2"
   }

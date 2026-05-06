@@ -1,0 +1,65 @@
+# VCS and editor cruft
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+*.swp
+
+# Dependencies and build artifacts
+**/node_modules
+**/dist
+**/coverage
+**/cache
+**/typechain
+**/typechain-types
+**/.next
+**/out
+**/*.tgz
+**/*.log
+
+# Env files — NEVER bake secrets into images.
+# Railway injects env vars at runtime via the dashboard.
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.test.example
+
+# Subprojects not needed for the fum_automation deploy
+fum/
+fum_testing/
+
+# Top-level docs/assets not needed in the image
+README.md
+CLAUDE.md
+LICENSE.md
+CHANGELOG.md
+docs/
+screenshots/
+
+# fum_automation: not used at build or runtime
+fum_automation/test/
+fum_automation/backtest/
+fum_automation/data/
+fum_automation/docs/
+fum_automation/contracts/
+fum_automation/bytecode/
+fum_automation/CHANGELOG.md
+fum_automation/TESTING.md
+fum_automation/README.md
+fum_automation/LICENSE.md
+fum_automation/CLAUDE.md
+fum_automation/nixpacks.toml
+fum_automation/hardhat.config.cjs
+fum_automation/vitest.config.js
+fum_automation/vitest.backtest.config.js
+
+# fum_library: not needed for npm pack
+# (test/setup and test/test-env.js stay — they're in package.json `files`)
+fum_library/docs/
+fum_library/CHANGELOG.md
+fum_library/README.md
+fum_library/LICENSE.md
+fum_library/CLAUDE.md
+fum_library/scripts/
+fum_library/vitest.config.js
