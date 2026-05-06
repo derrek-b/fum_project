@@ -25,6 +25,11 @@ FROM node:22-alpine AS deps
 WORKDIR /build/fum_automation
 COPY fum_automation/package.json fum_automation/package-lock.json ./
 COPY --from=library-builder /build/fum_library/fum_library-2.0.0.tgz /build/fum_library/fum_library-2.0.0.tgz
+# Drop the integrity hash for fum_library: the in-Docker tarball bytes
+# won't match the locally-packed one (file mtimes differ between the
+# local filesystem and Docker COPY operations). All other deps keep
+# their integrity pinning intact.
+RUN node -e "const fs=require('fs'); const lf=JSON.parse(fs.readFileSync('package-lock.json','utf8')); const e=lf.packages['node_modules/fum_library']; if(e) delete e.integrity; fs.writeFileSync('package-lock.json', JSON.stringify(lf,null,2));"
 RUN npm install --omit=dev --omit=optional
 
 # ============================================================
