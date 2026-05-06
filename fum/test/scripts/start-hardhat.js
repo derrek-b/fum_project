@@ -220,7 +220,7 @@ async function deployContracts(port) {
     // Save deployment info
     const timestamp = new Date().toISOString().replace(/:/g, "-").replace(/\..+/, "");
     const deploymentInfo = {
-      version: "0.2.1",
+      version: "2.0.0",
       timestamp,
       network: { name: "arbitrum", chainId },
       contracts: deploymentResults,
