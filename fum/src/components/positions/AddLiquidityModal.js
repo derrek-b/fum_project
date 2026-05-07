@@ -15,7 +15,6 @@ import { fetchTokenPrices, CACHE_DURATIONS } from 'fum_library/services/coingeck
 // Local project imports
 import { useToast } from '../../context/ToastContext.js';
 import { useProviders } from '../../hooks/useProviders';
-import { triggerUpdate } from '../../redux/updateSlice.js';
 import TransactionProgressModal from '../common/TransactionProgressModal';
 
 // CSS to hide number input spinner arrows
@@ -1191,7 +1190,6 @@ export default function AddLiquidityModal({
       setTimeout(() => {
         setShowTransactionModal(false);
         handleClose();
-        dispatch(triggerUpdate());
       }, 1500);
     } catch (error) {
       // Check if user rejected the transaction - handle silently
@@ -1423,7 +1421,6 @@ export default function AddLiquidityModal({
       setTimeout(() => {
         setShowTransactionModal(false);
         handleClose();
-        dispatch(triggerUpdate());
       }, 1500);
     } catch (error) {
       // Check if user rejected the transaction - handle silently
