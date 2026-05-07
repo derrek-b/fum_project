@@ -5,6 +5,8 @@
 
 24/7 Node.js service that monitors user vaults and executes automated liquidity management: rebalancing positions when price moves out of range, collecting fees when thresholds are met, and creating new positions when vaults are funded. Event-driven architecture with platform adapters from fum_library.
 
+Production runs in a Docker container on Railway, built from the repo-root `Dockerfile` (multi-stage: pack `fum_library` → strip lockfile integrity hash → install → runtime). See [`README.md` Deployment section](README.md#deployment) for Railway service config and env vars. The local-dev path (`npm run start`) doesn't go through Docker.
+
 ## Commands
 
 ```bash

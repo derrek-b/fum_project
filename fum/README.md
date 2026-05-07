@@ -187,6 +187,54 @@ fum/
 
 See `docs/architecture/` for per-subsystem deep dives (contract system, validator pattern, frontend, scripts pipeline).
 
+## Deployment
+
+Production runs on Vercel. The monorepo's local-tarball dependency on `fum_library` requires a custom install pipeline; everything else uses Vercel's Next.js defaults.
+
+### Vercel project configuration
+
+| Setting | Value |
+|---|---|
+| **Root Directory** | `fum` |
+| **Framework Preset** | Next.js (auto-detected and locked when Root = `fum`) |
+| **Install Command** | Override → `npm run install:vercel` |
+| **Build Command** | default (don't override) |
+| **Output Directory** | default (don't override) |
+| **Node.js Version** | 22.x |
+
+The `install:vercel` script (`fum/package.json`) packs `fum_library`, strips the now-stale integrity hash for `fum_library` from `fum/package-lock.json` (file mtimes diverge between local pack and Vercel pack), then runs `npm install`. The wrapper exists because Vercel's Install Command field has a 256-char limit, which the inline pipeline blows past. See `docs/decisions/deployment-architecture.md` for the shared `fum_library` tarball pattern used by both this and the `fum_automation` Dockerfile.
+
+### Required env vars
+
+Set in Vercel → Settings → Environment Variables (Production scope). Values come from your provider dashboards and the Railway-deployed automation service URL.
+
+| Variable | Purpose |
+|---|---|
+| `NEXT_PUBLIC_COINGECKO_API_KEY` | Token price feeds |
+| `NEXT_PUBLIC_ALCHEMY_API_KEY` | RPC endpoints (V3/V4 adapters, AlphaRouter) |
+| `NEXT_PUBLIC_THEGRAPH_API_KEY` | Subgraph queries (V4 pool discovery, position lookup) |
+| `NEXT_PUBLIC_DEMO_ADDRESS` | Wallet to feature on the demo page |
+| `NEXT_PUBLIC_DEMO_CHAIN_ID` | `42161` for production, `1337` for local fork |
+| `NEXT_PUBLIC_SSE_URL` | Public URL of the Railway automation service `/events` endpoint |
+
+### Important: `NEXT_PUBLIC_*` env vars are publicly visible
+
+Next.js bakes any env var prefixed `NEXT_PUBLIC_` directly into the client JavaScript bundle at build time. Anyone who loads the deployed frontend can read these values from DevTools. This is not a vulnerability — it's the only way client-side code can call third-party APIs — but it has implications:
+
+- **Configure Allowed Origins / Referrer restrictions** on every NEXT_PUBLIC_ key in its provider dashboard (Alchemy, CoinGecko, The Graph). Restricts the key to requests from your Vercel domain (and any custom domain you add).
+- **Set spending caps** on every key as a backstop in case the referrer restriction is bypassed.
+- For genuinely sensitive backend operations, route them through `fum_automation` (which has unprefixed env vars that stay server-only), not directly from the frontend.
+
+### Deploy lifecycle
+
+Vercel auto-rebuilds on every push to `main`. To force a redeploy without code changes (e.g., after env var updates):
+
+```bash
+git commit --allow-empty -m "trigger vercel rebuild" && git push
+```
+
+Or use the Redeploy button on the latest deployment in the Vercel dashboard — make sure to choose "Redeploy with current Project Settings", not "Redeploy with existing Build Cache", when settings have changed.
+
 ## Tech Stack
 
 ### Frontend

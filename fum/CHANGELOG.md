@@ -5,13 +5,6 @@ All notable changes to the FUM project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Removed
-
-- **`ParrisIslandStrategy.sol`** — deleted contract and corresponding test file from `fum_testing/`. Removed from `sync-contracts-to-ecosystem.js` (`TESTING_ONLY_CONTRACTS`) and from `.gitignore`. The contract was a skeleton-stage v0.4.0 advanced strategy, never deployed to any chain and never integrated into the automation service. It predated BabyStepsStrategy's parameter simplification (~10 → 6) and would have required substantial rewrites to revive. Git history preserves the implementation.
-- **`'fed'` strategy fallback in `StrategyConfigPanel.js`** — removed the dead-code fallback that defaulted `selectedStrategy = 'fed'` when a vault had `hasActiveStrategy` but no strategy details. The Fed strategy was never implemented (no contract, no config integration), and the fallback was never reached in normal flow.
-
 ## [2.0.0] - 2026-04-17
 
 Major release spanning multi-platform support (Uniswap V4, Trader Joe V2.2), executor funding flows, and frontend architecture refresh. Package versions across the monorepo aligned at 2.0.0 to match Solidity contract versions.
@@ -80,6 +73,22 @@ Major release spanning multi-platform support (Uniswap V4, Trader Joe V2.2), exe
 
 - `fum`, `fum_library`, `fum_automation`, `fum_testing` consolidated into the `fum_project` monorepo (git subtree). Full history preserved. Single git repo, no external remotes.
 - CLAUDE.md files at root and per-subproject; architecture docs under `docs/` at each level; `/commit` and `/update-brain` workflow skills.
+
+### Strategy Cleanup
+
+- **`ParrisIslandStrategy.sol`** — deleted contract and corresponding test file from `fum_testing/`. Removed from `sync-contracts-to-ecosystem.js` (`TESTING_ONLY_CONTRACTS`) and from `.gitignore`. The contract was a skeleton-stage v0.4.0 advanced strategy, never deployed to any chain and never integrated into the automation service. It predated BabyStepsStrategy's parameter simplification (~10 → 6) and would have required substantial rewrites to revive. Git history preserves the implementation.
+- **`'fed'` strategy fallback in `StrategyConfigPanel.js`** — removed the dead-code fallback that defaulted `selectedStrategy = 'fed'` when a vault had `hasActiveStrategy` but no strategy details. The Fed strategy was never implemented (no contract, no config integration), and the fallback was never reached in normal flow.
+
+### Production Deployment (2026-05-06)
+
+- **Chain-aware `deploy.js`** — rewrites the production deploy script around a `DEPLOYMENT_PLANS` map covering Arbitrum (42161) and Avalanche (43114). Deploys the full v2.0.0 contract suite per chain (core contracts + validators + chain-specific extras like TJPositionProxy/TJPositionManager) and registers validators on the deployed VaultFactory. Adds `--env-file=<path>` CLI flag for per-chain env files (e.g. `.env.vercel.arbitrum`). Drops the `--contract=` selective flag (half-deployed state without registered validators is worse than no deploy). Bumps deployment record `version` field to `2.0.0`. Same change applied to `start-hardhat.js` / `start-hardhat-avalanche.js` for record-format parity.
+- **v2.0.0 live on Arbitrum One** — VaultFactory `0x26E3413d152121C5aAfaa9936d5cBd437BB73431`, BabyStepsStrategy `0xF32D3fb50379Da1a2fe15eDC2ABc3D9213df765F`, plus UniversalRouter / Uniswap V3 PositionManager / Uniswap V4 PositionManager validators registered. Deployer (= VaultFactory owner) `0x388303941fba21D817Ed15B124bd23772B28C480`. Full record at `fum/deployments/42161-latest.json`.
+- **`install:vercel` npm script** — wraps the install pipeline (build + pack `fum_library`, strip the now-stale integrity hash for `fum_library` from `fum/package-lock.json`, then `npm install`) so the Vercel Install Command stays under its 256-char cap. Same EINTEGRITY workaround as the `fum_automation` Dockerfile, applied to the frontend deploy.
+- **`NEXT_PUBLIC_ALCHEMY_API_KEY` fallback in `deploy.js`** — accepts both `ALCHEMY_API_KEY` (backend convention) and `NEXT_PUBLIC_ALCHEMY_API_KEY` (Next.js / Vercel convention) so a single env file (`.env.vercel.arbitrum`) can serve both deploy and frontend Vercel uses.
+
+### Frontend — Bug Fixes (2026-05-06)
+
+- **`AddLiquidityModal`: removed stale `triggerUpdate` references** — the action was removed from `updateSlice.js` during the redux freshness refactor (data flow section above) but `AddLiquidityModal` was missed. The dangling import + two dispatches passed dev mode (more permissive) and crashed the production webpack build with export errors. Cost: after a successful add-liquidity or create-position tx, the position page no longer auto-refreshes — user must navigate or manually refresh to see new state. To be addressed properly in the planned `AddLiquidityModal` multi-platform redesign using the new `setResourceUpdating` pattern.
 
 ## [1.0.6] - 2025-12-18
 

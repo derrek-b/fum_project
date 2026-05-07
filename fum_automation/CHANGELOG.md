@@ -33,6 +33,13 @@
 - **ADDED**: `executor-utils.js`, `tracker-assertions.js`, `wait-utils.js` test helpers
 - **ADDED**: Gas profiling tests for all three platforms
 
+#### **Production Deployment — Docker on Railway** (2026-05-06)
+- **ADDED**: Multi-stage `Dockerfile` at repo root — packs `fum_library` into the tarball `fum_automation`'s `package.json` expects, strips the now-stale integrity hash from `package-lock.json` (file mtimes diverge between local pack and Docker pack), installs production deps, and ships only `src/`, `scripts/`, `package.json`, and `node_modules/` into the runtime image. Runs as non-root `node` user. Service starts via `node scripts/start-automation.js`.
+- **ADDED**: `.dockerignore` at repo root — excludes secrets (`.env*`), `node_modules`, build artifacts, sibling subprojects (`fum/`, `fum_testing/`), and per-subproject docs/tests not needed at build/runtime.
+- **ADDED**: Deployment section in `README.md` documenting the Docker build, Railway-specific config (Builder = Dockerfile, public domain on `SSE_PORT=${{PORT}}`, persistent volume at `/app/data`), and required env vars.
+- **CHANGED**: `dotenv` promoted from `devDependencies` to `dependencies`. It is statically imported by `scripts/start-automation.js` regardless of whether the dev-only fallback path runs, so a `--omit=dev` production install would crash on module load. Required for the Docker production install to work.
+- **REMOVED**: `nixpacks.toml` and `.npmrc` — v1.0 deploy crutches superseded by the Dockerfile. Nixpacks is deprecated on Railway, and the `.npmrc` defaults (`omit=dev`, `omit=optional`) were a workaround for the Heroku-style buildpack that no longer applies.
+
 **Status**: ✅ Production Ready
 **Breaking Changes**: Requires fum_library v2.0.0+ with multi-platform adapter support
 **Dependency**: Node.js >=22.0.0
