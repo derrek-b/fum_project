@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "install:vercel": "cd ../fum_library && npm run build && npm pack && cd ../fum && node -e \"const fs=require('fs'); const lf=JSON.parse(fs.readFileSync('package-lock.json','utf8')); const e=lf.packages['node_modules/fum_library']; if(e) delete e.integrity; fs.writeFileSync('package-lock.json', JSON.stringify(lf,null,2));\" && npm install --legacy-peer-deps",
     "start": "next start",
     "contracts:sync": "node scripts/sync-contracts-to-ecosystem.js",
     "contracts:test": "bash -c 'node scripts/sync-contracts-to-ecosystem.js --sync-only && cd ../fum_testing && npx hardhat test'",
