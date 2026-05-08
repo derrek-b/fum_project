@@ -77,6 +77,15 @@ class AutomationService {
     this.heartbeatInterval = null;
     this.heartbeatIntervalMs = 30000; // 30 seconds
 
+    // Heartbeat suppression: skip the periodic eth_blockNumber if other RPC
+    // traffic has exercised the WS pipe within the heartbeat window. Avoids
+    // spending CU on a redundant liveness check when strategies/adapters
+    // are already proving the RPC layer is alive. _heartbeatInFlight gates
+    // the debug listener so the heartbeat's own getBlockNumber call doesn't
+    // count as "real RPC traffic" and starve itself.
+    this._lastRpcCallAt = 0;
+    this._heartbeatInFlight = false;
+
     // WS metrics aggregation (only active when DEBUG_WS_EVENTS=true).
     // Counters reset every 60s when the summary is logged. Timer is started
     // lazily by attachSubscriptionDiagnostics on first call and persists
@@ -465,6 +474,10 @@ class AutomationService {
     // Attach WebSocket event handlers for disconnect detection
     this.attachProviderEventHandlers();
 
+    // Track non-heartbeat RPC traffic so the heartbeat can suppress itself
+    // when strategies/adapters are already exercising the RPC layer.
+    this.attachRpcTrafficTracking();
+
     // Test connection with retry logic for transient network failures
     const network = await retryRpcCall(
       () => this.provider.getNetwork(),
@@ -613,6 +626,7 @@ class AutomationService {
       subsDestroyed: 0,
       bytesIn: 0,
       bytesOut: 0,
+      heartbeatsSkipped: 0,   // count of heartbeat ticks suppressed by recent RPC traffic
     };
   }
 
@@ -634,6 +648,7 @@ class AutomationService {
       `subs_created=${m.subsCreated} ` +
       `subs_destroyed=${m.subsDestroyed} ` +
       `subs_active=${subsActive} ` +
+      `heartbeats_skipped=${m.heartbeatsSkipped} ` +
       `bytes_in=${m.bytesIn} ` +
       `bytes_out=${m.bytesOut}`
     );
@@ -667,6 +682,25 @@ class AutomationService {
     });
 
     this.log('WebSocket event handlers attached');
+  }
+
+  /**
+   * Attach an always-on debug listener that records the timestamp of the
+   * most recent non-heartbeat RPC request. Used by the heartbeat to skip
+   * its periodic eth_blockNumber when other RPC traffic has already
+   * exercised the WS pipe within the heartbeat window.
+   *
+   * Independent of DEBUG_WS_EVENTS — this runs in production. Cost is one
+   * extra event listener per provider; no I/O.
+   * @private
+   */
+  attachRpcTrafficTracking() {
+    if (!this.provider) return;
+    this.provider.on('debug', (info) => {
+      if (info.action === 'request' && !this._heartbeatInFlight) {
+        this._lastRpcCallAt = Date.now();
+      }
+    });
   }
 
   /**
@@ -757,6 +791,7 @@ class AutomationService {
         this.provider = new ethers.providers.WebSocketProvider(this.wsUrl);
         patchProviderFeeData(this.provider, this.chainId);
         this.attachProviderEventHandlers();
+        this.attachRpcTrafficTracking();
 
         // Re-attach WS diagnostics to the new provider so metrics keep
         // flowing across reconnects (the lazy-init guard inside keeps the
@@ -908,12 +943,26 @@ class AutomationService {
         return;
       }
 
+      // Suppress: if any non-heartbeat RPC request happened within this
+      // heartbeat window, the RPC layer is already proven alive — skip.
+      // _lastRpcCallAt is populated by attachRpcTrafficTracking and only
+      // counts requests issued while _heartbeatInFlight is false.
+      const sinceLastRpc = Date.now() - this._lastRpcCallAt;
+      if (this._lastRpcCallAt > 0 && sinceLastRpc < this.heartbeatIntervalMs) {
+        if (this.wsMetrics) this.wsMetrics.heartbeatsSkipped += 1;
+        this.log(`Heartbeat skipped (last RPC ${sinceLastRpc}ms ago)`);
+        return;
+      }
+
       try {
+        this._heartbeatInFlight = true;
         await this.provider.getBlockNumber();
       } catch (error) {
         this.log(`Heartbeat failed: ${error.message}`);
         // Trigger reconnection
         this.handleProviderDisconnect(1006, 'Heartbeat failed');
+      } finally {
+        this._heartbeatInFlight = false;
       }
     }, this.heartbeatIntervalMs);
 
