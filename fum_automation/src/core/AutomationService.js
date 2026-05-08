@@ -949,8 +949,9 @@ class AutomationService {
       // counts requests issued while _heartbeatInFlight is false.
       const sinceLastRpc = Date.now() - this._lastRpcCallAt;
       if (this._lastRpcCallAt > 0 && sinceLastRpc < this.heartbeatIntervalMs) {
+        // Suppression observable via wsMetrics.heartbeatsSkipped counter
+        // when DEBUG_WS_EVENTS=true; per-skip log dropped to reduce noise.
         if (this.wsMetrics) this.wsMetrics.heartbeatsSkipped += 1;
-        this.log(`Heartbeat skipped (last RPC ${sinceLastRpc}ms ago)`);
         return;
       }
 
