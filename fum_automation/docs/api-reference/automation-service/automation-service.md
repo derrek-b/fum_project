@@ -86,7 +86,8 @@ Creates: EventManager, VaultDataService, Tracker, VaultHealth, ServiceHealth, SS
 | `attemptReconnection()` | Reconnect WebSocket provider with backoff |
 | `reestablishEventListeners()` | Re-register all blockchain listeners after reconnect |
 | `handleProviderDisconnect(code, reason)` | Handle WebSocket disconnect event |
-| `startHeartbeat()` / `stopHeartbeat()` | Periodic provider health check (30s interval) |
+| `startHeartbeat()` / `stopHeartbeat()` | Periodic provider health check (30s interval). Each tick suppresses itself if a non-heartbeat RPC request happened within the heartbeat window — the RPC layer is already proven alive, so the heartbeat would be redundant. Suppression count is observable via `wsMetrics.heartbeatsSkipped` when `DEBUG_WS_EVENTS=true`. |
+| `attachRpcTrafficTracking()` | Always-on `provider.on('debug', ...)` listener that records the timestamp of the most recent non-heartbeat RPC request into `_lastRpcCallAt`. The heartbeat's own `getBlockNumber` is excluded via the `_heartbeatInFlight` flag. Called from both `initializeProvider()` and the reconnect path so suppression survives reconnects. |
 
 ## Utilities
 

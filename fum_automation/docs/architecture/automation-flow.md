@@ -46,8 +46,8 @@ new AutomationService(config)
 
 Disconnect detection has three paths:
 1. **WebSocket `close` / `error`** — raw transport event from ethers, code ≠ 1000 triggers reconnect
-2. **Heartbeat failure** — 30s `getBlockNumber()` poll throws, RPC-level liveness check
-3. **ServiceHealth** — SubscriptionCanary (silent eth_subscription death) or PingPongKeepalive (silent transport death), both funnel through `handleProviderDisconnect(1006, reason)`
+2. **Heartbeat failure** — 30s `getBlockNumber()` poll throws, RPC-level liveness check. Heartbeat is suppressed when other RPC traffic exercised the WS pipe within the window (see `_lastRpcCallAt` / `_heartbeatInFlight` in `AutomationService` and `attachRpcTrafficTracking()`); active strategies effectively replace this path with their own RPC traffic surfacing failures naturally.
+3. **ServiceHealth** — PingPongKeepalive (silent transport death) funnels through `handleProviderDisconnect(1006, reason)`. SubscriptionCanary (silent eth_subscription death) is **no-op'd in production** as of 2026-05-08 to eliminate Alchemy CU burn from `eth_subscribe newHeads` delivery — see [service-health.md](../api-reference/core/service-health.md) for the full rationale and re-enable path.
 
 All three converge on the same `attemptReconnection()` flow:
 
