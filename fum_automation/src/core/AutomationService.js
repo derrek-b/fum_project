@@ -77,6 +77,13 @@ class AutomationService {
     this.heartbeatInterval = null;
     this.heartbeatIntervalMs = 30000; // 30 seconds
 
+    // WS metrics aggregation (only active when DEBUG_WS_EVENTS=true).
+    // Counters reset every 60s when the summary is logged. Timer is started
+    // lazily by attachSubscriptionDiagnostics on first call and persists
+    // across reconnects until stop().
+    this.wsMetrics = null;
+    this.wsMetricsTimer = null;
+
     // Caches
     this.contracts = {};
     this.adapters = new Map();
@@ -323,6 +330,12 @@ class AutomationService {
     // 2. Stop heartbeat monitoring
     this.stopHeartbeat();
 
+    // 2.5. Stop WS metrics summary timer (DEBUG_WS_EVENTS=true diagnostic)
+    if (this.wsMetricsTimer) {
+      clearInterval(this.wsMetricsTimer);
+      this.wsMetricsTimer = null;
+    }
+
     // 3. Clean up all monitored vaults (strategy cleanup, listeners, locks)
     const vaults = this.vaultDataService.getAllVaults();
     if (vaults.length > 0) {
@@ -498,25 +511,69 @@ class AutomationService {
   attachSubscriptionDiagnostics() {
     this.log('🔬 [WS-DIAG] WebSocket subscription diagnostics ENABLED');
 
-    // 1. Log eth_subscribe requests and confirmations via provider debug event
+    // Lazy-init the cross-reconnect metrics aggregator. attachSubscriptionDiagnostics
+    // is called on each new provider (initial + every reconnect), but the counters
+    // and the 60s summary timer must persist across reconnects, so we initialize once.
+    if (!this.wsMetrics) {
+      this._initWsMetrics();
+      this.wsMetricsTimer = setInterval(() => this._logWsMetricsSummary(), 60_000);
+      if (this.wsMetricsTimer.unref) this.wsMetricsTimer.unref();
+    }
+
+    // 1. Hook RPC requests/responses for: per-method send count, bytes_out,
+    //    sub creation/destruction count, and existing subscribe-trace logging.
     this.provider.on('debug', (info) => {
-      if (info.action === 'request' && info.request?.method === 'eth_subscribe') {
-        console.log(`🔬 [WS-DIAG] eth_subscribe SENT: ${JSON.stringify(info.request.params)}`);
+      if (info.action === 'request' && info.request?.method) {
+        const method = info.request.method;
+        this.wsMetrics.rpcSent[method] = (this.wsMetrics.rpcSent[method] || 0) + 1;
+        try {
+          this.wsMetrics.bytesOut += JSON.stringify(info.request).length;
+        } catch { /* circular structure — skip byte accounting for this one */ }
+
+        if (method === 'eth_subscribe') {
+          console.log(`🔬 [WS-DIAG] eth_subscribe SENT: ${JSON.stringify(info.request.params)}`);
+        }
       }
       if (info.action === 'response' && info.request?.method === 'eth_subscribe') {
         console.log(`🔬 [WS-DIAG] eth_subscribe CONFIRMED — subId: ${info.response}`);
+        this.wsMetrics.subsCreated += 1;
+      }
+      if (info.action === 'response' && info.request?.method === 'eth_unsubscribe') {
+        this.wsMetrics.subsDestroyed += 1;
       }
     });
 
-    // 2. Log raw subscription events arriving over the WebSocket
+    // 2. Hook raw onmessage for: bytes_in, notification count by type
+    //    (newHeads vs logs[topicPrefix]), and existing per-event tracing.
     if (this.provider._websocket) {
       const originalOnMessage = this.provider._websocket.onmessage;
       this.provider._websocket.onmessage = (messageEvent) => {
         try {
+          const dataLen = typeof messageEvent.data === 'string'
+            ? messageEvent.data.length
+            : (messageEvent.data?.length || 0);
+          this.wsMetrics.bytesIn += dataLen;
+
           const msg = JSON.parse(messageEvent.data);
           if (msg.method === 'eth_subscription') {
+            const subId = msg.params?.subscription;
+            // Look up the sub on the current provider to bucket the notification.
+            // On a reconnect storm, an event from a stale closure may not resolve;
+            // those land in 'unknown' which itself is a useful signal.
+            const sub = this.provider._subs?.[subId];
+            let bucket = 'unknown';
+            if (sub?.tag === 'block') {
+              bucket = 'newHeads';
+            } else if (sub?.tag?.startsWith('filter:')) {
+              const topic = msg.params?.result?.topics?.[0]?.slice(0, 10) || 'no-topic';
+              bucket = `logs[${topic}]`;
+            } else if (sub?.tag) {
+              bucket = sub.tag;
+            }
+            this.wsMetrics.notifications[bucket] = (this.wsMetrics.notifications[bucket] || 0) + 1;
+
             const topicHash = msg.params?.result?.topics?.[0] || 'no-topics';
-            console.log(`🔬 [WS-DIAG] RAW subscription event received — subId: ${msg.params.subscription}, topic: ${topicHash.slice(0, 10)}..., address: ${msg.params?.result?.address || 'none'}`);
+            console.log(`🔬 [WS-DIAG] RAW subscription event received — subId: ${subId}, topic: ${topicHash.slice(0, 10)}..., address: ${msg.params?.result?.address || 'none'}`);
           }
         } catch {
           // Ignore parse errors on non-JSON messages
@@ -538,6 +595,49 @@ class AutomationService {
         console.log(`🔬 [WS-DIAG]   subId=${subId} → tag=${sub.tag}`);
       }
     }, 3000);
+  }
+
+  /**
+   * Initialize/reset the WS metrics counter object. Called once on first
+   * activation (lazy from attachSubscriptionDiagnostics) and again every
+   * 60s after the rolling summary fires.
+   * @private
+   */
+  _initWsMetrics() {
+    this.wsMetrics = {
+      reconnects: 0,
+      disconnects: {},        // "code:reason" -> count
+      rpcSent: {},            // method -> count
+      notifications: {},      // bucket -> count (newHeads, logs[topicPrefix], unknown, ...)
+      subsCreated: 0,
+      subsDestroyed: 0,
+      bytesIn: 0,
+      bytesOut: 0,
+    };
+  }
+
+  /**
+   * Log the rolling 60s summary of WebSocket activity and reset counters.
+   * Output format is intentionally one line so tail/grep is easy.
+   * @private
+   */
+  _logWsMetricsSummary() {
+    if (!this.wsMetrics) return;
+    const m = this.wsMetrics;
+    const subsActive = this.provider?._subs ? Object.keys(this.provider._subs).length : 0;
+    console.log(
+      `🔬 [WS-METRICS 60s] ` +
+      `reconnects=${m.reconnects} ` +
+      `disconnects=${JSON.stringify(m.disconnects)} ` +
+      `rpc_sent=${JSON.stringify(m.rpcSent)} ` +
+      `notifications=${JSON.stringify(m.notifications)} ` +
+      `subs_created=${m.subsCreated} ` +
+      `subs_destroyed=${m.subsDestroyed} ` +
+      `subs_active=${subsActive} ` +
+      `bytes_in=${m.bytesIn} ` +
+      `bytes_out=${m.bytesOut}`
+    );
+    this._initWsMetrics();
   }
 
   /**
@@ -584,6 +684,16 @@ class AutomationService {
     // Ignore normal closure during stop()
     if (code === 1000) {
       return;
+    }
+
+    // WS metrics: count this disconnect cycle and capture the close reason.
+    // This is the single chokepoint reached by all real triggers (canary
+    // onUnhealthy, pingpong onUnhealthy, heartbeat failure, real ws close),
+    // so the reason string distinguishes them.
+    if (this.wsMetrics) {
+      this.wsMetrics.reconnects += 1;
+      const key = `${code}:${reason || 'none'}`;
+      this.wsMetrics.disconnects[key] = (this.wsMetrics.disconnects[key] || 0) + 1;
     }
 
     this.log(`Provider disconnected (code: ${code}). Attempting reconnection...`);
@@ -647,6 +757,13 @@ class AutomationService {
         this.provider = new ethers.providers.WebSocketProvider(this.wsUrl);
         patchProviderFeeData(this.provider, this.chainId);
         this.attachProviderEventHandlers();
+
+        // Re-attach WS diagnostics to the new provider so metrics keep
+        // flowing across reconnects (the lazy-init guard inside keeps the
+        // 60s summary timer alive — only the per-provider hooks are rebound).
+        if (process.env.DEBUG_WS_EVENTS === 'true') {
+          this.attachSubscriptionDiagnostics();
+        }
 
         // Verify connection
         const network = await this.provider.getNetwork();
