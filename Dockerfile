@@ -47,7 +47,13 @@ COPY fum_automation/scripts ./scripts
 # /app/data holds runtime state (vaults/, blacklist.json,
 # trackingFailures.json). Mount a Railway volume here for
 # persistence across deploys, or set DATA_DIR to point elsewhere.
-RUN mkdir -p /app/data && chown -R node:node /app
-USER node
+#
+# Runs as root: Railway-mounted volumes come up owned by root, and our
+# DATA_DIR (e.g. /data) typically points at one of those mounts. A
+# non-root USER would hit EACCES on the volume regardless of any
+# build-time chown, since the volume mount overlays the build-time
+# path with its own ownership at runtime. The container is isolated
+# by Railway's infrastructure; running as root here doesn't escape it.
+RUN mkdir -p /app/data
 
 CMD ["node", "scripts/start-automation.js"]
