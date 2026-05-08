@@ -54,6 +54,30 @@ class SubscriptionCanary {
   start({ provider, chainId, onUnhealthy, expectedBlockMsOverride }) {
     this.stop();
 
+    // ----------------------------------------------------------------------
+    // TEMPORARY NO-OP (added 2026-05-08): canary disabled in production.
+    //
+    // Steady-state newHeads delivery on Arbitrum (4 events/sec from this
+    // canary's `eth_subscribe newHeads`) projected to burn 5.5M–35M CU/day
+    // on Alchemy (depends on per-event billing rate), exceeding the free
+    // monthly tier in healthy operation alone. Confirmed against publicnode
+    // baseline 2026-05-08: ~240 newHeads/min is the dominant WS traffic.
+    //
+    // PingPongKeepalive still catches transport-layer death globally; what
+    // we lose is detection of "transport alive but Alchemy stopped delivering
+    // events" — a real failure mode but acceptable cost for now.
+    //
+    // To re-enable: remove this early-return block. Tests pass through
+    // because they always provide `expectedBlockMsOverride`; production
+    // callers never do, so production hits the no-op while the canary
+    // tests in fum_automation/test/ still exercise the real path.
+    // ----------------------------------------------------------------------
+    if (expectedBlockMsOverride === undefined) {
+      this.log(`SubscriptionCanary: production no-op active (canary disabled for chain ${chainId})`);
+      this.enabled = false;
+      return;
+    }
+
     const expectedBlockMs =
       expectedBlockMsOverride !== undefined
         ? expectedBlockMsOverride
