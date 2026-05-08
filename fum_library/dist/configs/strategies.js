@@ -166,9 +166,9 @@ const strategies = {
         description: "Range percentage above current price",
         type: "percent",
         defaultValue: 5.0,
-        min: 0.1,
+        min: 0.01,
         max: 20.0,
-        step: 0.1,
+        step: 0.01,
         suffix: "%",
         group: 0,
         contractGroup: "range"
@@ -178,9 +178,9 @@ const strategies = {
         description: "Range percentage below current price",
         type: "percent",
         defaultValue: 5.0,
-        min: 0.1,
+        min: 0.01,
         max: 20.0,
-        step: 0.1,
+        step: 0.01,
         suffix: "%",
         group: 0,
         contractGroup: "range"
