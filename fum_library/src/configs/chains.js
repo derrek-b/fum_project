@@ -15,7 +15,7 @@ const chains = {
     },
     rpcUrls: ["https://arb-mainnet.g.alchemy.com/v2"],  // Base URL - API key appended by getChainRpcUrls()
     blockExplorerUrls: ["https://arbiscan.io"],
-    executorXpub: "",  // Populated when production mnemonic is generated
+    executorXpub: "xpub6FFKeua6zBqDwi8jwEC2LSmxzqUJi4EJonzNPqEChheZ7DCn4HskgJZjajTAVtEqKjEsvkCu7YjK8VsU6qoHWsFb1pwK2VwK2hue11iWxQM",
     minExecutorBalance: 0.002,  // ETH — ~12 worst-case rebalance cycles (at 200 gwei spike)
     maxExecutorBalance: 0.004,  // ETH — ~24 worst-case rebalance cycles
     maxPriorityFeePerGas: "0",  // wei/gas — Arbitrum sequencer is FCFS, ignores tips entirely
