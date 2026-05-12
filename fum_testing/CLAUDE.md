@@ -3,7 +3,7 @@
 
 ## What This Project Is
 
-Isolated Hardhat environment for unit testing the FUM smart contracts. Forks Arbitrum mainnet locally so tests run against real protocol addresses (Uniswap, Permit2) with isolated state. Contracts are synced here from `fum/contracts/` via `npm run contracts:sync` in the fum project.
+Isolated Hardhat environment for unit testing the FUM smart contracts. Runs on a local Hardhat network (chainId 1337) with no mainnet forking — external protocols (Uniswap, Permit2, Trader Joe) are simulated via mock contracts in `contracts/Mock*.sol`. Contracts are synced here from `fum/contracts/` via `npm run contracts:sync` in the fum project.
 
 ## Commands
 
