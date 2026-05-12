@@ -30,7 +30,7 @@ node scripts/deploy.js --help                     # Chain-aware deploy, see flag
 npm run install:vercel                            # Vercel install pipeline (NOT for local dev)
 ```
 
-`deploy.js` is chain-aware via a `DEPLOYMENT_PLANS` map (Arbitrum, Avalanche, plus 1337/1338 fork aliases) and deploys the full v2.0.0 contract suite + validators per chain. Run `node scripts/deploy.js --help` for the full invocation pattern.
+`deploy.js` is chain-aware via a `DEPLOYMENT_PLANS` map (Arbitrum, Avalanche, plus 1337/1338 fork aliases) and deploys the full v2.0.0 contract suite + validators per chain. It auto-runs `sync-contracts-to-ecosystem.js` first so the bytes shipped to chain always reflect current contract source. Run `node scripts/deploy.js --help` for the full invocation pattern.
 
 `install:vercel` exists only because Vercel's Install Command field has a 256-char limit. It packs `fum_library`, strips the lockfile integrity hash for the tarball, and runs `npm install`. For local dev, just use `npm install`.
 

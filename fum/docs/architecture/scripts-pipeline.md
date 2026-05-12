@@ -157,32 +157,38 @@ Reads compiled artifacts from fum_testing and outputs raw hex `.bin` files.
 
 **Source:** `scripts/deploy.js`
 
-Chain-agnostic deployment with automatic address tracking.
+Chain-aware deployment with automatic address tracking. **Always runs `sync-contracts-to-ecosystem.js` as its first step** so the bytes shipped to chain reflect current contract source — closes the failure mode where stale `fum/bytecode/*.bin` was deployed weeks after source edits.
 
 ### Usage
 
 ```bash
-node scripts/deploy.js --network=localhost                        # Deploy all to localhost
-node scripts/deploy.js --network=arbitrum --contract=VaultFactory # Deploy one contract
-node scripts/deploy.js --list                                     # List available contracts
+node scripts/deploy.js --network=localhost                                # Deploy to local fork
+ARBITRUM_DEPLOYER_PK=0x... node scripts/deploy.js \
+  --network=arbitrum --env-file=.env.vercel.arbitrum                      # Deploy to Arbitrum
+AVALANCHE_DEPLOYER_PK=0x... node scripts/deploy.js \
+  --network=avalanche --env-file=.env.vercel.avalanche                    # Deploy to Avalanche
+node scripts/deploy.js --help                                             # Full flag reference
 ```
 
-### Available Contracts
+Selective deploys (the previous `--contract=` and `--list` flags) were removed — they produced broken state because validators weren't registered. Each chain deploys its full plan from `DEPLOYMENT_PLANS` in deploy.js.
 
-Only 2 contracts are deployable via this script:
-- `VaultFactory`
-- `BabyStepsStrategy`
+### Deployment Plans (per chain)
+
+Driven by the `DEPLOYMENT_PLANS` map keyed by chainId:
+
+- **42161 (Arbitrum One)** / **1337 (Arbitrum fork)** — `VaultFactory`, `BabyStepsStrategy`, `UniversalRouterValidator`, `UniswapV3PositionValidator`, `UniswapV4PositionValidator` (validators registered on the factory).
+- **43114 (Avalanche)** / **1338 (Avalanche fork)** — same core + `TJPositionProxy`, `TJPositionManager`, `TJPositionValidator`, `TJSwapValidator`. Post-deploy hook writes the freshly deployed `TJPositionManager` address back into `fum_library/configs/chains.js` so the TJ adapter can find it at runtime.
 
 ### Network → ChainId Mapping
 
 | Network Name | ChainId |
 |---|---|
-| `localhost` | 1337 |
-| `mainnet` / `ethereum` | 1 |
+| `localhost` | 1337 (Arbitrum fork) |
+| `localhost-av` | 1338 (Avalanche fork) |
 | `arbitrum` | 42161 |
-| `polygon` | 137 |
-| `optimism` | 10 |
-| `base` | 8453 |
+| `avalanche` | 43114 |
+
+Other chains are not supported by deploy.js — `DEPLOYMENT_PLANS` only has entries for the four above (with 1337/1338 reusing 42161/43114 plans).
 
 ### Private Key Resolution
 
@@ -214,13 +220,21 @@ factory.deploy(
 **Deployment JSON structure:**
 ```javascript
 {
-  "version": "0.2.1",
-  "timestamp": "2025-02-16T10-30-45",
-  "network": { "name": "localhost", "chainId": 1337 },
-  "contracts": { "VaultFactory": "0x...", "BabyStepsStrategy": "0x..." },
+  "version": "2.0.0",
+  "timestamp": "2026-05-06T22-39-39",
+  "network": { "name": "Arbitrum One", "chainId": 42161 },
+  "contracts": {
+    "VaultFactory": "0x...",
+    "BabyStepsStrategy": "0x...",
+    "UniversalRouterValidator": "0x...",
+    "UniswapV3PositionValidator": "0x...",
+    "UniswapV4PositionValidator": "0x..."
+  },
   "deployer": "0x..."
 }
 ```
+
+If a deploy fails mid-flight, the partial record is saved as `{chainId}-{timestamp}-PARTIAL.json` and the `-latest.json` pointer is **not** updated.
 
 ### Library Name Mapping
 
@@ -238,7 +252,7 @@ All located in `test/scripts/`.
 
 **Commands:** `npm run hardhat` (Arbitrum) / `npm run hardhat:av` (Avalanche)
 
-Spawns a Hardhat node with a mainnet fork, auto-deploys contracts, and updates fum_library addresses.
+Auto-syncs contracts, spawns a Hardhat node with a mainnet fork, deploys contracts, and updates fum_library addresses. The sync step runs **before** the node is spawned so `deployContracts()` reads fresh bytecode — same guarantee as `deploy.js`.
 
 | | Arbitrum | Avalanche |
 |---|---|---|
@@ -248,14 +262,15 @@ Spawns a Hardhat node with a mainnet fork, auto-deploys contracts, and updates f
 | Extra contracts | V3 + V4 position validators, UniversalRouterValidator | TJPositionProxy, TJPositionManager, TJSwapValidator, TJPositionValidator |
 
 **Sequence (both):**
-1. Spawn `npx hardhat node --port {port}` (Cancun hardfork for V4 transient storage)
-2. Wait for node ready
-3. Deploy VaultFactory with canonical Permit2 address
-4. Deploy BabyStepsStrategy (no constructor params)
-5. Deploy platform-specific validators and register on VaultFactory
-6. Update fum_library with localhost addresses (both src/ and dist/)
-7. Save deployment to `deployments/{chainId}-latest.json`
-8. Keep running (Ctrl+C to stop)
+1. Run `sync-contracts-to-ecosystem.js` (full source→bytecode→artifact pipeline)
+2. Spawn `npx hardhat node --port {port}` (Cancun hardfork for V4 transient storage)
+3. Wait for node ready
+4. Deploy VaultFactory with canonical Permit2 address
+5. Deploy BabyStepsStrategy (no constructor params)
+6. Deploy platform-specific validators and register on VaultFactory
+7. Update fum_library with localhost addresses (both src/ and dist/)
+8. Save deployment to `deployments/{chainId}-latest.json`
+9. Keep running (Ctrl+C to stop)
 
 The Avalanche script additionally deploys TJPositionProxy (implementation) and TJPositionManager (with lbRouterAddress + proxy address), and updates `chains.js` with the deployed TJPositionManager address.
 
@@ -352,9 +367,9 @@ Moves Trader Joe V2.2 pool price by draining active bins. Each run drains 2 bins
 | sync-contracts-to-ecosystem.js | `fum/contracts/` | `fum_testing/contracts/`, `fum_library/src+dist/artifacts/`, `fum_library/bytecode/`, `fum_automation/bytecode/`, `fum/bytecode/` |
 | extract-abis.js | `fum/contracts/` (via solc) | `fum_library/src/artifacts/contracts.js`, `fum_library/dist/artifacts/contracts.js` |
 | extract-bytecode.js | `fum_testing/artifacts/` | `fum/bytecode/` |
-| deploy.js | `fum/bytecode/`, chain config | `fum/deployments/`, `fum_library/src+dist/artifacts/contracts.js` |
-| start-hardhat.js | `fum/bytecode/`, fum_library artifacts | `fum/deployments/`, `fum_library/src+dist/artifacts/contracts.js` |
-| start-hardhat-avalanche.js | `fum/bytecode/`, fum_library artifacts | `fum/deployments/`, `fum_library/src+dist/artifacts/contracts.js`, `fum_library/src+dist/configs/chains.js` |
+| deploy.js | `fum/bytecode/`, chain config | `fum/deployments/`, `fum_library/src+dist/artifacts/contracts.js` + everything sync writes (auto-runs sync first) |
+| start-hardhat.js | `fum/bytecode/`, fum_library artifacts | `fum/deployments/`, `fum_library/src+dist/artifacts/contracts.js` + everything sync writes (auto-runs sync first) |
+| start-hardhat-avalanche.js | `fum/bytecode/`, fum_library artifacts | `fum/deployments/`, `fum_library/src+dist/artifacts/contracts.js`, `fum_library/src+dist/configs/chains.js` + everything sync writes (auto-runs sync first) |
 
 **The "forgot to pack" problem:** deploy.js and start-hardhat.js write directly to `fum_library/dist/` for immediate effect, but fum and fum_automation consume fum_library via tarball. Changes won't propagate until `cd fum_library && npm run pack` is run.
 

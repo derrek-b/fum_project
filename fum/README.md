@@ -149,8 +149,8 @@ Core scripts:
 | `npm run contracts:sync` | Sync contracts to fum_library, fum_automation, and fum_testing |
 | `npm run contracts:test` | Sync contracts + run Hardhat contract tests in fum_testing |
 | `npm run contracts:test:coverage` | Sync contracts + run Hardhat coverage in fum_testing |
-| `npm run hardhat` | Start Arbitrum fork (chain 1337, port 8545) + deploy contracts |
-| `npm run hardhat:av` | Start Avalanche fork (chain 1338, port 8546) + deploy contracts |
+| `npm run hardhat` | Auto-sync contracts + start Arbitrum fork (chain 1337, port 8545) + deploy contracts |
+| `npm run hardhat:av` | Auto-sync contracts + start Avalanche fork (chain 1338, port 8546) + deploy contracts |
 
 > **Note:** `contracts:test:coverage` produces a large share of false-negative gaps (viaIR + solidity-coverage 0.8.16 interaction). See [fum_testing/docs/architecture/coverage-quirks.md](../fum_testing/docs/architecture/coverage-quirks.md) before acting on the report.
 
