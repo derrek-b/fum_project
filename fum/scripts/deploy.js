@@ -17,6 +17,7 @@ import { ethers } from 'ethers';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 import dotenv from 'dotenv';
 import { getChainConfig } from 'fum_library/helpers/chainHelpers';
 import contractData from 'fum_library/artifacts/contracts';
@@ -25,6 +26,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const LIBRARY_PATH = path.resolve(__dirname, '../../fum_library');
+const SYNC_SCRIPT = path.join(__dirname, 'sync-contracts-to-ecosystem.js');
 const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
 const DEFAULT_GAS_LIMIT = 5000000;
 
@@ -51,6 +53,11 @@ Options:
                        Production usage requires explicit --env-file=
                        since the file varies per chain.
   --help, -h           Show this help message
+
+Always runs sync-contracts-to-ecosystem.js first, guaranteeing the bytes
+shipped to chain reflect the current contract source. Closes the failure
+mode behind the 2026-05-06 incident, where stale fum/bytecode/*.bin (from
+04-12) was deployed weeks after the VERSION constants were added.
 
 Required env vars (loaded from --env-file):
   ALCHEMY_API_KEY      Alchemy key for the target chain's RPC URL.
@@ -232,6 +239,17 @@ function readBytecode(name) {
   return '0x' + fs.readFileSync(bytecodePath, 'utf8').trim();
 }
 
+// Runs the canonical sync pipeline (source sync → compile → extract bytecode
+// → extract ABIs → distribute to ecosystem) so deploy never ships stale .bin.
+// The 2026-05-06 incident: someone edited fum/contracts/ on 04-20 (added
+// VERSION constants), never ran `npm run contracts:sync`, then deployed on
+// 05-06 from .bin files extracted 04-12 — shipping pre-VERSION bytecode.
+function syncBeforeDeploy() {
+  console.log('Running sync-contracts-to-ecosystem.js to guarantee fresh bytecode...\n');
+  execSync(`node ${SYNC_SCRIPT}`, { stdio: 'inherit' });
+  console.log('');
+}
+
 // Maps deployment name to the key used in fum_library/artifacts/contracts.js.
 // BabyStepsStrategy is keyed as "bob" historically; everything else uses its
 // own name. Keep this here (not in the plan map) so the plan stays declarative.
@@ -407,6 +425,8 @@ async function deploy() {
 
   console.log(`Deploying to ${chainConfig.name} (chainId ${chainId})`);
   console.log(`Env file: ${envPath}`);
+
+  syncBeforeDeploy();
 
   const rpcUrl = buildRpcUrl(chainConfig, chainId);
   const provider = new ethers.providers.JsonRpcProvider(rpcUrl);

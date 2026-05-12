@@ -9,7 +9,7 @@ import { ethers } from 'ethers';
 import dotenv from 'dotenv';
 import contractData from 'fum_library/artifacts/contracts';
 import { getChainConfig } from 'fum_library/helpers/chainHelpers';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +18,7 @@ dotenv.config({ path: '.env.local' });
 
 // Path to the library
 const LIBRARY_PATH = path.resolve(__dirname, '../../../fum_library');
+const SYNC_SCRIPT = path.resolve(__dirname, '../../scripts/sync-contracts-to-ecosystem.js');
 
 // Function to update library contracts.js files
 function updateLibraryContracts(contractsData) {
@@ -253,6 +254,13 @@ async function main() {
   const port = portArgIndex !== -1 && args.length > portArgIndex + 1
     ? parseInt(args[portArgIndex + 1], 10)
     : 8545;
+
+  // Sync contracts BEFORE spawning the node so deployContracts() reads fresh
+  // bytecode. Same reason deploy.js does this — prevents shipping stale .bin
+  // when contract sources changed but no one ran `npm run contracts:sync`.
+  console.log('Running sync-contracts-to-ecosystem.js to guarantee fresh bytecode...\n');
+  execSync(`node ${SYNC_SCRIPT}`, { stdio: 'inherit' });
+  console.log('');
 
   console.log("Starting Hardhat node with Arbitrum mainnet fork...");
   console.log("Hardfork: Cancun (supports Uniswap V4 transient storage)");
