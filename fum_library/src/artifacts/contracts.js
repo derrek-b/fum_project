@@ -463,19 +463,6 @@
         "type": "function"
       },
       {
-        "inputs": [],
-        "name": "getVersion",
-        "outputs": [
-          {
-            "internalType": "string",
-            "name": "",
-            "type": "string"
-          }
-        ],
-        "stateMutability": "pure",
-        "type": "function"
-      },
-      {
         "inputs": [
           {
             "internalType": "address",
@@ -940,6 +927,19 @@
         "type": "event"
       },
       {
+        "inputs": [],
+        "name": "VERSION",
+        "outputs": [
+          {
+            "internalType": "string",
+            "name": "",
+            "type": "string"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
         "inputs": [
           {
             "internalType": "address[]",
@@ -1122,19 +1122,6 @@
           }
         ],
         "stateMutability": "view",
-        "type": "function"
-      },
-      {
-        "inputs": [],
-        "name": "getVersion",
-        "outputs": [
-          {
-            "internalType": "string",
-            "name": "",
-            "type": "string"
-          }
-        ],
-        "stateMutability": "pure",
         "type": "function"
       },
       {
@@ -1693,6 +1680,19 @@
         "type": "event"
       },
       {
+        "inputs": [],
+        "name": "VERSION",
+        "outputs": [
+          {
+            "internalType": "string",
+            "name": "",
+            "type": "string"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
         "inputs": [
           {
             "internalType": "uint256",
@@ -1876,19 +1876,6 @@
           }
         ],
         "stateMutability": "view",
-        "type": "function"
-      },
-      {
-        "inputs": [],
-        "name": "getVersion",
-        "outputs": [
-          {
-            "internalType": "string",
-            "name": "",
-            "type": "string"
-          }
-        ],
-        "stateMutability": "pure",
         "type": "function"
       },
       {
@@ -2600,6 +2587,19 @@
         "type": "event"
       },
       {
+        "inputs": [],
+        "name": "VERSION",
+        "outputs": [
+          {
+            "internalType": "string",
+            "name": "",
+            "type": "string"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
         "inputs": [
           {
             "internalType": "uint256",
@@ -3071,6 +3071,19 @@
   "TJPositionProxy": {
     "abi": [
       {
+        "inputs": [],
+        "name": "VERSION",
+        "outputs": [
+          {
+            "internalType": "string",
+            "name": "",
+            "type": "string"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
         "inputs": [
           {
             "internalType": "address",
@@ -3223,6 +3236,19 @@
   "UniversalRouterValidator": {
     "abi": [
       {
+        "inputs": [],
+        "name": "VERSION",
+        "outputs": [
+          {
+            "internalType": "string",
+            "name": "",
+            "type": "string"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
         "inputs": [
           {
             "internalType": "bytes",
@@ -3248,6 +3274,19 @@
   },
   "UniswapV3PositionValidator": {
     "abi": [
+      {
+        "inputs": [],
+        "name": "VERSION",
+        "outputs": [
+          {
+            "internalType": "string",
+            "name": "",
+            "type": "string"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
       {
         "inputs": [
           {
@@ -3347,6 +3386,19 @@
   "UniswapV4PositionValidator": {
     "abi": [
       {
+        "inputs": [],
+        "name": "VERSION",
+        "outputs": [
+          {
+            "internalType": "string",
+            "name": "",
+            "type": "string"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
         "inputs": [
           {
             "internalType": "bytes",
@@ -3444,6 +3496,19 @@
   },
   "TJPositionValidator": {
     "abi": [
+      {
+        "inputs": [],
+        "name": "VERSION",
+        "outputs": [
+          {
+            "internalType": "string",
+            "name": "",
+            "type": "string"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
       {
         "inputs": [
           {
@@ -3543,6 +3608,19 @@
   "TJSwapValidator": {
     "abi": [
       {
+        "inputs": [],
+        "name": "VERSION",
+        "outputs": [
+          {
+            "internalType": "string",
+            "name": "",
+            "type": "string"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
         "inputs": [
           {
             "internalType": "bytes",
@@ -3567,6 +3645,19 @@
   },
   "MerklIncentiveValidator": {
     "abi": [
+      {
+        "inputs": [],
+        "name": "VERSION",
+        "outputs": [
+          {
+            "internalType": "string",
+            "name": "",
+            "type": "string"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
       {
         "inputs": [
           {
