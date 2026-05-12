@@ -1,4 +1,4 @@
-<!-- Source: package.json, hardhat.config.js, contracts/Mock*.sol, test/unit/*.test.js, docs/architecture/*.md -->
+<!-- Source: package.json, hardhat.config.js, contracts/Mock*.sol, test/unit/*.test.js, scripts/*.js, docs/architecture/*.md -->
 # CLAUDE.md — fum_testing (Contract Test Environment)
 
 ## What This Project Is
@@ -64,9 +64,21 @@ Detailed docs in `docs/architecture/`:
 ## Key Details
 
 - **Solidity**: ^0.8.28
-- **Hardhat config**: Local network only (chainId `1337`), no forking — external protocols are simulated via mocks
-- **Setup**: `npm install` — no environment variables required
+- **Hardhat config**: `hardhat` network (chainId `1337`) for tests, plus `arbitrumOne` (chainId `42161`) — read-only, no signing — for Arbiscan verification. External protocols in tests are simulated via mocks, not forked.
+- **Setup**: `npm install`. No env vars required for running tests. `scripts/verify-arbitrum.js` needs `BLOCK_EXPLORER_API_KEY` in a `.env` file (gitignored) — Etherscan V2 unified key, works for Arbiscan.
 - **Interfaces**: `contracts/interfaces/` (6 files: `IIncentiveValidator`, `ILBPair`, `ILBRouter`, `ILiquidityValidator`, `ISwapValidator`, `IVaultFactory`) — also synced from `fum/contracts/`
-- **Dependencies**: OpenZeppelin v5, Uniswap V3 core/periphery, Hardhat Toolbox
+- **Dependencies**: OpenZeppelin v5, Uniswap V3 core/periphery, Hardhat Toolbox, `@nomicfoundation/hardhat-verify` (Arbiscan submission), `dotenv` (env loading)
 - **No dependency on fum_library** — this project is fully standalone
 - Tests use Hardhat's built-in Chai matchers (`expect(...).to.be.revertedWith(...)`, etc.)
+
+## Contract Verification
+
+`scripts/verify-arbitrum.js` submits the deployed Arbitrum contracts to Arbiscan via the Etherscan V2 API:
+
+```bash
+npx hardhat run scripts/verify-arbitrum.js --network arbitrumOne
+```
+
+Reads `../fum/deployments/42161-latest.json` to get addresses and the deployer (used as VaultFactory's constructor `initialOwner`). Override with `DEPLOYMENT_RECORD=<path>` when running from a git worktree at an older commit where that file may be stale.
+
+The local compilation must match deployed bytecode exactly — hardhat-verify pre-flight checks this and fails fast if there's a mismatch. If contracts on-chain were deployed from an older source state, recompile from that commit (e.g., in a `git worktree`) before running verify.

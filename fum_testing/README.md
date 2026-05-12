@@ -53,7 +53,9 @@ This testing suite validates all contracts synced from `fum/contracts/`:
 npm install
 ```
 
-No environment variables required — tests are fully self-contained.
+No environment variables required for tests — they are fully self-contained.
+
+The Arbiscan verification script (`scripts/verify-arbitrum.js`) needs `BLOCK_EXPLORER_API_KEY` in a `.env` file at the project root (gitignored). Use an Etherscan V2 unified key — one key works for all supported chains including Arbiscan.
 
 ## Contracts Are Synced — Do Not Edit Here
 
@@ -94,6 +96,20 @@ Prefer these when you've edited contracts in `../fum/contracts/` — they avoid 
 ```bash
 npx hardhat coverage
 ```
+
+## Contract Verification (Arbiscan)
+
+Submits the deployed Arbitrum contracts to Arbiscan so the source code, function names, and revert strings are readable in the explorer.
+
+```bash
+npx hardhat run scripts/verify-arbitrum.js --network arbitrumOne
+```
+
+Reads `../fum/deployments/42161-latest.json` to determine which addresses to verify and which deployer to pass to VaultFactory's `initialOwner` constructor arg. Override with `DEPLOYMENT_RECORD=<path>` when running from a `git worktree` at an older commit (the worktree's deployment record may be stale or unrelated).
+
+**Requirements:**
+- `.env` file at the project root containing `BLOCK_EXPLORER_API_KEY=<Etherscan V2 unified key>`
+- Local compilation must reproduce the deployed bytecode exactly — hardhat-verify pre-flight checks this and fails fast if there's a mismatch. If the on-chain contracts were deployed from older source than HEAD, set up a `git worktree` at the deploying commit, recompile, and run verify from there.
 
 ## Test Structure
 
