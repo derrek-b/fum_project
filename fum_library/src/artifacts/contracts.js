@@ -699,7 +699,7 @@
     "addresses": {
       "1337": "0xA7aeb0176680297E8004c2350fbef75E1C9646Cd",
       "1338": "0xF816b7FfDa4a8aB6B68540D1993fCa98E462b3bc",
-      "42161": "0xF32D3fb50379Da1a2fe15eDC2ABc3D9213df765F"
+      "42161": "0x0eC2C1d5348529f32BA650740973697B717f803D"
     }
   },
   "PositionVault": {
@@ -2331,7 +2331,7 @@
     "addresses": {
       "1337": "0x0A283CDF71cA71f64b9784448976B76da2b1B78B",
       "1338": "0x8797847c9d63D8Ed9C30B058F408d4257A33B76C",
-      "42161": "0x26E3413d152121C5aAfaa9936d5cBd437BB73431"
+      "42161": "0xd8df5E3b354F583c5ECD84Ce27AD678b90807F64"
     }
   },
   "TJPositionManager": {
@@ -3269,7 +3269,7 @@
     ],
     "addresses": {
       "1337": "0x9737C4C261C20F7CcCD0Bb16a368922c2F72F6C4",
-      "42161": "0xee74ecAa120357206d37100DcbB67E036A6C8733"
+      "42161": "0xF9b9b0fB5b960B075AE13200910fc8B00E898Fb0"
     }
   },
   "UniswapV3PositionValidator": {
@@ -3380,7 +3380,7 @@
     ],
     "addresses": {
       "1337": "0x07b8C761A4230ACb63829fB6Af1A2C2d52b9Cf04",
-      "42161": "0x5fA6ADa41f7ba31946360695F06c64007E77A4f4"
+      "42161": "0xE88558081A32386e6E5900a8b2B40015F7F745Ba"
     }
   },
   "UniswapV4PositionValidator": {
@@ -3491,7 +3491,7 @@
     ],
     "addresses": {
       "1337": "0x916Db2bBA373556ABD96e2174aE4EE55416e70d9",
-      "42161": "0x61A2ccEa030572c4F6a4fE7f5fc51676B02027ad"
+      "42161": "0xB26847c5761f75c37f70854A45D08c3616c4E1b5"
     }
   },
   "TJPositionValidator": {
