@@ -32,6 +32,8 @@ npm run install:vercel                            # Vercel install pipeline (NOT
 
 `deploy.js` is chain-aware via a `DEPLOYMENT_PLANS` map (Arbitrum, Avalanche, plus 1337/1338 fork aliases) and deploys the full v2.0.0 contract suite + validators per chain. It auto-runs `sync-contracts-to-ecosystem.js` first so the bytes shipped to chain always reflect current contract source. Run `node scripts/deploy.js --help` for the full invocation pattern.
 
+Production deploys use `--env-file=.env.deploy.<chain>` (e.g. `.env.deploy.arbitrum`) which holds `ALCHEMY_API_KEY` — a **separate Alchemy key from the frontend's** `NEXT_PUBLIC_ALCHEMY_API_KEY` in `.env.vercel.<chain>`. The frontend key has a Vercel-domain allowlist (because it's exposed to the browser); server-side calls have no Origin header, so they'd 403 against that allowlist. The deploy key is unrestricted or IP-restricted instead. Don't share one key between the two.
+
 `install:vercel` exists only because Vercel's Install Command field has a 256-char limit. It packs `fum_library`, strips the lockfile integrity hash for the tarball, and runs `npm install`. For local dev, just use `npm install`.
 
 **Seed script variants** — each platform has a base script plus opt-in flags via `ENABLE_STRATEGY` and `ENABLE_AUTOMATION`:

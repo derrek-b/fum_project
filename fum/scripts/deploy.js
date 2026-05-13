@@ -61,8 +61,12 @@ mode behind the 2026-05-06 incident, where stale fum/bytecode/*.bin (from
 
 Required env vars (loaded from --env-file):
   ALCHEMY_API_KEY      Alchemy key for the target chain's RPC URL.
+                       Prefer .env.deploy.<chain> with this var (no
+                       NEXT_PUBLIC_ prefix) so the deploy key is distinct
+                       from the frontend key — the frontend key is
+                       domain-restricted to Vercel and would 403 here.
                        NEXT_PUBLIC_ALCHEMY_API_KEY accepted as fallback
-                       (matches the Vercel-frontend env file convention).
+                       only for legacy compatibility.
 
 Required env vars (pass INLINE, never in --env-file):
   ARBITRUM_DEPLOYER_PK   Deployer private key for --network=arbitrum
@@ -71,10 +75,10 @@ Required env vars (pass INLINE, never in --env-file):
 
 Examples:
   ARBITRUM_DEPLOYER_PK=0x... node scripts/deploy.js \\
-    --network=arbitrum --env-file=.env.vercel.arbitrum
+    --network=arbitrum --env-file=.env.deploy.arbitrum
 
   AVALANCHE_DEPLOYER_PK=0x... node scripts/deploy.js \\
-    --network=avalanche --env-file=.env.vercel.avalanche
+    --network=avalanche --env-file=.env.deploy.avalanche
 
   node scripts/deploy.js --network=localhost
 `);

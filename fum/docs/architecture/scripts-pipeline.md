@@ -164,13 +164,20 @@ Chain-aware deployment with automatic address tracking. **Always runs `sync-cont
 ```bash
 node scripts/deploy.js --network=localhost                                # Deploy to local fork
 ARBITRUM_DEPLOYER_PK=0x... node scripts/deploy.js \
-  --network=arbitrum --env-file=.env.vercel.arbitrum                      # Deploy to Arbitrum
+  --network=arbitrum --env-file=.env.deploy.arbitrum                      # Deploy to Arbitrum
 AVALANCHE_DEPLOYER_PK=0x... node scripts/deploy.js \
-  --network=avalanche --env-file=.env.vercel.avalanche                    # Deploy to Avalanche
+  --network=avalanche --env-file=.env.deploy.avalanche                    # Deploy to Avalanche
 node scripts/deploy.js --help                                             # Full flag reference
 ```
 
 Selective deploys (the previous `--contract=` and `--list` flags) were removed — they produced broken state because validators weren't registered. Each chain deploys its full plan from `DEPLOYMENT_PLANS` in deploy.js.
+
+**Two separate Alchemy keys per chain:**
+
+- `.env.vercel.<chain>` — used by Vercel build + browser bundle. Holds `NEXT_PUBLIC_ALCHEMY_API_KEY`, which is domain-restricted to Vercel domains (because the `NEXT_PUBLIC_` prefix ships it to client JS).
+- `.env.deploy.<chain>` — used by `deploy.js`. Holds `ALCHEMY_API_KEY` (no `NEXT_PUBLIC_` prefix). Server-side calls send no `Origin` header, so the Vercel-domain allowlist on the frontend key would 403 them. Use a separate Alchemy key (or app) for deploys — unrestricted, or IP-allowlisted to the deploy machine.
+
+The `deploy.js` `buildRpcUrl()` prefers `ALCHEMY_API_KEY` and falls back to `NEXT_PUBLIC_ALCHEMY_API_KEY` only for legacy compatibility.
 
 ### Deployment Plans (per chain)
 
