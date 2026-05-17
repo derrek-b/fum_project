@@ -5,6 +5,16 @@ All notable changes to the FUM Library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-05-17
+
+### Fixed
+
+- **Uniswap V3/V4 upper-tick boundary** — `isPositionInRange` (V3) and `evaluatePositionRange` (V3 + V4) now correctly treat the upper tick as exclusive, matching Uniswap's `[tickLower, tickUpper)` fee-accumulator semantics. Previously used `currentTick <= tickUpper` (inclusive), causing positions parked exactly at `tickUpper` to be reported as in-range even though they earn no fees. Surfaced as a USDC/USDT 0.01% production stall where the position sat at the upper boundary with no new fees for 12+ hours. TraderJoe V2.2 uses bin set-membership and is unaffected. Reference: `Tick.getFeeGrowthInside` in `Uniswap/v3-core` and `Pool.getFeeGrowthInside` in `Uniswap/v4-core`.
+
+### Documentation
+
+- Clarified `[tickLower, tickUpper)` semantics in `docs/api-reference/adapters/uniswap-v3-adapter.md` (corrected stale `<=` operator) and `docs/api-reference/adapters/uniswap-v4-adapter.md` (added explicit operator detail rather than just "identical to V3").
+
 ## [2.0.0] - 2026-04-17
 
 Covers work between 2025-12-17 and 2026-04-16. Package versions across the monorepo aligned at 2.0.0 to match Solidity contract versions.

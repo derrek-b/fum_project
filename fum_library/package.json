@@ -1,6 +1,6 @@
 {
   "name": "fum_library",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": "Derrek Brack & Claude Code",
   "license": "SEE LICENSE IN LICENSE.md",
   "description": "Shared utilities for FUM DeFi management",
@@ -41,7 +41,7 @@
   ],
   "scripts": {
     "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/",
-    "pack": "npm run build && npm pack && ([ -d ../fum ] && cd ../fum && npm uninstall fum_library 2>/dev/null; npm install file:../fum_library/fum_library-2.0.0.tgz --legacy-peer-deps && echo '  ✓ fum' || echo '  ⊘ fum (not found)') && ([ -d ../fum_automation ] && cd ../fum_automation && npm uninstall fum_library 2>/dev/null; npm install file:../fum_library/fum_library-2.0.0.tgz --include=dev && echo '  ✓ fum_automation' || echo '  ⊘ fum_automation (not found)') && echo '✅ fum_library pack complete'",
+    "pack": "npm run build && npm pack && ([ -d ../fum ] && cd ../fum && npm uninstall fum_library 2>/dev/null; npm install file:../fum_library/fum_library-2.0.1.tgz --legacy-peer-deps && echo '  ✓ fum' || echo '  ⊘ fum (not found)') && ([ -d ../fum_automation ] && cd ../fum_automation && npm uninstall fum_library 2>/dev/null; npm install file:../fum_library/fum_library-2.0.1.tgz --include=dev && echo '  ✓ fum_automation' || echo '  ⊘ fum_automation (not found)') && echo '✅ fum_library pack complete'",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

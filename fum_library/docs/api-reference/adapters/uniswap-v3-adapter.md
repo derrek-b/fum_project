@@ -125,7 +125,7 @@ These methods are on the adapter instance but are V3-only (not part of the platf
 
 > **V3-specific utility.** For the platform-agnostic interface method with distance metrics, use `evaluatePositionRange()` from the base class.
 
-Simple boolean check: `tickLower <= currentTick <= tickUpper`.
+Simple boolean check: `tickLower <= currentTick < tickUpper` (upper bound exclusive, per Uniswap V3's `[tickLower, tickUpper)` fee-accumulator semantics — see `Tick.getFeeGrowthInside` in `Uniswap/v3-core`).
 
 ```javascript
 const inRange = adapter.isPositionInRange(currentTick, tickLower, tickUpper);

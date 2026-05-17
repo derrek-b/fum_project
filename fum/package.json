@@ -1,6 +1,6 @@
 {
   "name": "fum",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": "Derrek Brack & Claude Code",
   "license": "SEE LICENSE IN LICENSE.md",
   "description": "Front end for the full F.U.M. liquidity position management & automation app",
@@ -48,7 +48,7 @@
     "@web3modal/ethereum": "^2.7.1",
     "bootstrap": "^5.3.3",
     "ethers": "^5.7.2",
-    "fum_library": "file:../fum_library/fum_library-2.0.0.tgz",
+    "fum_library": "file:../fum_library/fum_library-2.0.1.tgz",
     "next": "^15.5.7",
     "react": "^19.0.0",
     "react-bootstrap": "^2.10.9",

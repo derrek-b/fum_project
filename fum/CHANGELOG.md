@@ -5,6 +5,16 @@ All notable changes to the FUM project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-05-17
+
+### Position Card
+
+- **Fixed**: `PriceRangeChart` current-price marker now aligns with the lower/upper bound labels. Previously the marker used 0–100% coordinates while the active red zone was hardcoded at 25–75%, so a marker at "current = upperPrice" rendered at the far right of the gray bar instead of the right edge of the red. Coordinates are now remapped so `rangePct=0 → 5%` (left red edge), `rangePct=100 → 95%` (right red edge); active red zone widened from 50% to 90% of the bar for tighter in-range resolution.
+
+### Dependencies
+
+- **Updated**: Bundled `fum_library@2.0.1` (V3/V4 upper-tick boundary correctness fix).
+
 ## [2.0.0] - 2026-04-17
 
 Major release spanning multi-platform support (Uniswap V4, Trader Joe V2.2), executor funding flows, and frontend architecture refresh. Package versions across the monorepo aligned at 2.0.0 to match Solidity contract versions.

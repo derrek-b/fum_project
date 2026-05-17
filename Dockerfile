@@ -3,7 +3,7 @@
 # ============================================================
 # Stage 1: build + pack fum_library tarball
 # fum_library is consumed by fum_automation as a local tarball
-# (file:../fum_library/fum_library-2.0.0.tgz). It is not published
+# (file:../fum_library/fum_library-2.0.1.tgz). It is not published
 # to a registry, so we have to produce the tarball during build.
 # ============================================================
 FROM node:22-alpine AS library-builder
@@ -18,13 +18,13 @@ RUN npm run pack
 # ============================================================
 # Stage 2: install fum_automation production dependencies
 # fum_automation's package.json references the tarball at
-# file:../fum_library/fum_library-2.0.0.tgz, so the file must
+# file:../fum_library/fum_library-2.0.1.tgz, so the file must
 # sit at exactly that relative path when npm install runs.
 # ============================================================
 FROM node:22-alpine AS deps
 WORKDIR /build/fum_automation
 COPY fum_automation/package.json fum_automation/package-lock.json ./
-COPY --from=library-builder /build/fum_library/fum_library-2.0.0.tgz /build/fum_library/fum_library-2.0.0.tgz
+COPY --from=library-builder /build/fum_library/fum_library-2.0.1.tgz /build/fum_library/fum_library-2.0.1.tgz
 # Drop the integrity hash for fum_library: the in-Docker tarball bytes
 # won't match the locally-packed one (file mtimes differ between the
 # local filesystem and Docker COPY operations). All other deps keep

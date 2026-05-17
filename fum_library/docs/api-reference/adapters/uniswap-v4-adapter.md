@@ -152,7 +152,7 @@ All 27 automation + 2 display methods from `PlatformAdapter` are implemented. Th
 
 | Method | V4 Notes |
 |---|---|
-| `evaluatePositionRange(position, provider, options?)` | Tick-based range check identical to V3. Fast path via `options.swapData.tick` bypasses RPC. |
+| `evaluatePositionRange(position, provider, options?)` | Tick-based range check identical to V3. In-range iff `tickLower <= currentTick < tickUpper` (upper bound exclusive, per Uniswap V4's `[tickLower, tickUpper)` fee-accumulator semantics — see `Pool.getFeeGrowthInside` in `Uniswap/v4-core`). Fast path via `options.swapData.tick` bypasses RPC. |
 | `getAccruedFeesUSD(position, tokenPrices, provider)` | Uses `StateView.getFeeGrowthInside` instead of manual tick arithmetic. Lookup is keyed by `(poolId, positionManager, tickLower, tickUpper, salt)` where `salt = bytes32(tokenId)`. Returns V3-compatible shape plus raw `fees0`/`fees1` (used for native ETH handling in closure parsing). |
 | `extractPositionBounds(position)` | Returns `{ lower: tickLower, upper: tickUpper }`. |
 

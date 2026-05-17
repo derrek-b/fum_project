@@ -1,5 +1,15 @@
 # F.U.M. Project Changelog
 
+## [2.0.1] - 2026-05-17
+
+### Bug Fixes
+
+- **FIXED**: Picks up `fum_library@2.0.1` which corrects the V3/V4 upper-tick boundary check in `isPositionInRange` and `evaluatePositionRange`. Positions parked exactly at `tickUpper` were previously reported as in-range, causing the live USDC/USDT 0.01% vault to stall at the upper boundary with no rebalance for 12+ hours.
+
+### Observability
+
+- **ADDED**: `BabyStepsStrategy` "Position range status" log now includes `tickLower` and `tickUpper` alongside `current`, `centeredness`, and `inRange`, making boundary-related issues directly diagnosable without contract calls.
+
 ## [2.0.0] - 2026-04-17
 
 ### Multi-Platform Support
