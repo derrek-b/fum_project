@@ -898,8 +898,8 @@ export default class UniswapV4Adapter extends PlatformAdapter {
         const { poolData, token0Data, token1Data } = poolDataMap.get(poolId);
 
         for (const pos of group.positions) {
-          // Range check
-          const inRange = poolData.tick >= pos.tickLower && poolData.tick <= pos.tickUpper;
+          // Range check — upper bound is exclusive per Uniswap V4 (see Pool.getFeeGrowthInside in v4-core)
+          const inRange = poolData.tick >= pos.tickLower && poolData.tick < pos.tickUpper;
 
           // Prices from ticks
           const currentPriceObj = this._tickToPrice(poolData.tick, token0Data, token1Data);
@@ -1060,8 +1060,8 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       const token0Data = this._resolveTokenDataForDisplay(normalizedPoolKey.currency0);
       const token1Data = this._resolveTokenDataForDisplay(normalizedPoolKey.currency1);
 
-      // Range check
-      const inRange = poolData.tick >= tickLower && poolData.tick <= tickUpper;
+      // Range check — upper bound is exclusive per Uniswap V4 (see Pool.getFeeGrowthInside in v4-core)
+      const inRange = poolData.tick >= tickLower && poolData.tick < tickUpper;
 
       // Prices
       const currentPriceObj = this._tickToPrice(poolData.tick, token0Data, token1Data);
@@ -1357,7 +1357,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       throw new Error(`Invalid tick range: ${position.tickLower} to ${position.tickUpper}`);
     }
 
-    const inRange = currentTick >= position.tickLower && currentTick <= position.tickUpper;
+    const inRange = currentTick >= position.tickLower && currentTick < position.tickUpper;
     const distanceToUpper = (position.tickUpper - currentTick) / rangeSize;
     const distanceToLower = (currentTick - position.tickLower) / rangeSize;
     const centeredness = distanceToLower; // 0 = at lower, 0.5 = centered, 1 = at upper

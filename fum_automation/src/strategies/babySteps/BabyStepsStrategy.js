@@ -334,7 +334,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       { swapData }
     );
 
-    this.log(`Position range status: centeredness=${(rangeStatus.centeredness * 100).toFixed(2)}%, inRange=${rangeStatus.inRange}, current=${rangeStatus.current}`);
+    this.log(`Position range status: centeredness=${(rangeStatus.centeredness * 100).toFixed(2)}%, inRange=${rangeStatus.inRange}, current=${rangeStatus.current}, tickLower=${position.tickLower}, tickUpper=${position.tickUpper}`);
 
     if (!rangeStatus.inRange) {
       this.log(`🔄 REBALANCE NEEDED for vault ${vault.address}: Position is out of range`);

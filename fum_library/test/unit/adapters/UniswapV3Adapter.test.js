@@ -3205,8 +3205,19 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result).toBe(true);
       });
 
-      it('should return true when current tick equals upper tick', () => {
+      it('should return false when current tick equals upper tick', () => {
+        // Uniswap V3 active range is [tickLower, tickUpper) — upper bound is exclusive.
+        // At currentTick === tickUpper the pool considers the position out of range.
         const currentTick = 150;
+        const tickLower = 50;
+        const tickUpper = 150;
+
+        const result = adapter.isPositionInRange(currentTick, tickLower, tickUpper);
+        expect(result).toBe(false);
+      });
+
+      it('should return true when current tick is one below upper tick', () => {
+        const currentTick = 149;
         const tickLower = 50;
         const tickUpper = 150;
 
@@ -3316,13 +3327,17 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should handle minimum safe tick spacing', () => {
-        // Minimum tick spacing in Uniswap V3 is 1
+        // Minimum tick spacing in Uniswap V3 is 1. With tickLower=99 and tickUpper=100
+        // (range width = 1), currentTick=100 equals tickUpper and is out of range.
         const currentTick = 100;
         const tickLower = 99;
         const tickUpper = 100;
 
         const result = adapter.isPositionInRange(currentTick, tickLower, tickUpper);
-        expect(result).toBe(true);
+        expect(result).toBe(false);
+
+        // currentTick === tickLower (99) is in range
+        expect(adapter.isPositionInRange(99, tickLower, tickUpper)).toBe(true);
       });
 
       it('should handle extreme tick values near limits', () => {
@@ -3332,7 +3347,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         expect(adapter.isPositionInRange(0, minTick, maxTick)).toBe(true);
         expect(adapter.isPositionInRange(minTick, minTick, maxTick)).toBe(true);
-        expect(adapter.isPositionInRange(maxTick, minTick, maxTick)).toBe(true);
+        // currentTick === tickUpper is out of range (upper bound exclusive)
+        expect(adapter.isPositionInRange(maxTick, minTick, maxTick)).toBe(false);
+        expect(adapter.isPositionInRange(maxTick - 1, minTick, maxTick)).toBe(true);
       });
     });
   });
@@ -7398,6 +7415,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should correctly evaluate position at upper edge', async () => {
+        // Uniswap V3 active range is [tickLower, tickUpper) — at currentTick === tickUpper
+        // the position is out of range. Geometric distance/centeredness values still reflect
+        // the tick's position within the bounds.
         const position = { tickLower: -100, tickUpper: 100 };
         const swapData = { tick: 100 };
         const result = await adapter.evaluatePositionRange(position, null, { swapData });
@@ -7405,6 +7425,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result.centeredness).toBe(1);
         expect(result.distanceToLower).toBe(1);
         expect(result.distanceToUpper).toBe(0);
+        expect(result.inRange).toBe(false);
+      });
+
+      it('should correctly evaluate position one tick below upper edge', async () => {
+        const position = { tickLower: -100, tickUpper: 100 };
+        const swapData = { tick: 99 };
+        const result = await adapter.evaluatePositionRange(position, null, { swapData });
+
         expect(result.inRange).toBe(true);
       });
 

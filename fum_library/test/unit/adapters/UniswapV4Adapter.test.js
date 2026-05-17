@@ -5520,15 +5520,28 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(result.current).toBe(-100);
       });
 
-      it('should return inRange=true when tick equals tickUpper', async () => {
+      it('should return inRange=false when tick equals tickUpper', async () => {
+        // Uniswap V4 active range is [tickLower, tickUpper) — upper bound is exclusive.
+        // See Pool.getFeeGrowthInside in Uniswap v4-core.
         const result = await adapter.evaluatePositionRange(
           { tickLower: -100, tickUpper: 100 },
           env.provider,
           { swapData: { tick: 100 } }
         );
 
-        expect(result.inRange).toBe(true);
+        expect(result.inRange).toBe(false);
         expect(result.current).toBe(100);
+      });
+
+      it('should return inRange=true when tick is one below tickUpper', async () => {
+        const result = await adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: 99 } }
+        );
+
+        expect(result.inRange).toBe(true);
+        expect(result.current).toBe(99);
       });
 
       it('should return inRange=false when tick is below range', async () => {

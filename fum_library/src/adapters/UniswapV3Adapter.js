@@ -1954,7 +1954,9 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error('Invalid tick range: tickLower must be less than tickUpper');
     }
 
-    return currentTick >= tickLower && currentTick <= tickUpper;
+    // Uniswap V3 active range is [tickLower, tickUpper) — at currentTick == tickUpper
+    // the position is out of range (no fees). See Tick.getFeeGrowthInside in Uniswap v3-core.
+    return currentTick >= tickLower && currentTick < tickUpper;
   }
 
   /**
@@ -2021,7 +2023,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error(`Invalid tick range: ${position.tickLower} to ${position.tickUpper}`);
     }
 
-    const inRange = currentTick >= position.tickLower && currentTick <= position.tickUpper;
+    const inRange = currentTick >= position.tickLower && currentTick < position.tickUpper;
     const distanceToUpper = (position.tickUpper - currentTick) / rangeSize;
     const distanceToLower = (currentTick - position.tickLower) / rangeSize;
     const centeredness = distanceToLower; // 0 = at lower, 0.5 = centered, 1 = at upper

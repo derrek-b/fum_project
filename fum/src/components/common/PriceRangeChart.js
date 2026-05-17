@@ -62,7 +62,8 @@ const PriceRangeChart = ({
   const { lowerPrice: lower, upperPrice: upper, currentPrice: current } = validation;
 
   try {
-    // Calculate position within range (as percentage)
+    // Calculate position within range (as percentage of the [lower, upper] interval).
+    // 0 = at lower bound, 100 = at upper bound. Values outside [0, 100] = out of range.
     let rangePct = 0;
 
     // Handle division by zero or very small denominators
@@ -77,6 +78,15 @@ const PriceRangeChart = ({
     const isOutOfRange = rangePct < 0 || rangePct > 100;
     const isAboveRange = rangePct > 100;
     const isBelowRange = rangePct < 0;
+
+    // The active (red) range occupies 90% of the bar (5% padding on each side for
+    // out-of-range marker space). Remap rangePct from the [lower, upper] coordinate
+    // space onto the bar's pixel coordinate space so the marker aligns with the red
+    // edges: rangePct=0 → 5% of bar (left red edge), rangePct=100 → 95% (right red edge).
+    const ACTIVE_RANGE_LEFT_PCT = 5;
+    const ACTIVE_RANGE_WIDTH_PCT = 90;
+    const toBarPct = (pct) => ACTIVE_RANGE_LEFT_PCT + (pct * ACTIVE_RANGE_WIDTH_PCT / 100);
+    const markerBarPct = toBarPct(Math.min(Math.max(rangePct, 0), 100));
 
     // For display purposes - handle potential formatting errors
     let displayLower = "N/A";
@@ -128,8 +138,8 @@ const PriceRangeChart = ({
         height: '100%',
         backgroundColor: chartColor,
         opacity: 0.4,
-        left: '25%',
-        width: '50%',
+        left: `${ACTIVE_RANGE_LEFT_PCT}%`,
+        width: `${ACTIVE_RANGE_WIDTH_PCT}%`,
         borderRadius: '0'
       },
       priceMarker: {
@@ -137,12 +147,12 @@ const PriceRangeChart = ({
         width: '3px',
         height: '50px',
         backgroundColor: '#000',
-        left: `${rangePct}%`,
+        left: `${markerBarPct}%`,
         top: '-5px'
       },
       priceLabel: {
         position: 'absolute',
-        left: `${rangePct}%`,
+        left: `${markerBarPct}%`,
         top: '-25px',
         transform: 'translateX(-50%)',
         backgroundColor: '#f5f5f5',
@@ -155,7 +165,7 @@ const PriceRangeChart = ({
       },
       lowerPriceLabel: {
         position: 'absolute',
-        left: '25%',
+        left: `${ACTIVE_RANGE_LEFT_PCT}%`,
         bottom: '-25px',
         transform: 'translateX(-50%)',
         fontSize: '12px',
@@ -164,7 +174,7 @@ const PriceRangeChart = ({
       },
       upperPriceLabel: {
         position: 'absolute',
-        left: '75%',
+        left: `${ACTIVE_RANGE_LEFT_PCT + ACTIVE_RANGE_WIDTH_PCT}%`,
         bottom: '-25px',
         transform: 'translateX(-50%)',
         fontSize: '12px',
@@ -187,38 +197,19 @@ const PriceRangeChart = ({
       priceDisplayText = `← ${displayCurrent}`;
     }
 
-    // Calculate position for marker and label (clamp to 0-100 for positioning)
-    const clampedPct = Math.min(Math.max(rangePct, 0), 100);
-
     return (
       <div style={chartStyles.container}>
         <div style={chartStyles.rangeBar}>
           {/* Active price range */}
-          <div
-            style={{
-              ...chartStyles.activeRange,
-              left: '25%',
-              width: '50%'
-            }}
-          />
+          <div style={chartStyles.activeRange} />
 
           {/* Current price marker - only show if in range */}
           {!isOutOfRange && (
-            <div
-              style={{
-                ...chartStyles.priceMarker,
-                left: `${clampedPct}%`
-              }}
-            />
+            <div style={chartStyles.priceMarker} />
           )}
 
           {/* Current price label */}
-          <div
-            style={{
-              ...chartStyles.priceLabel,
-              left: `${clampedPct}%`
-            }}
-          >
+          <div style={chartStyles.priceLabel}>
             {priceDisplayText}
           </div>
 
