@@ -124,7 +124,9 @@ The current implementation provides **BabyStepsStrategy** with the parameters be
 
 ### fum_library Setup
 
-fum_library is consumed as a local tarball (`file:../fum_library/fum_library-*.tgz`) rather than via `npm link`. After making changes in fum_library, rebuild and reinstall the tarball into sibling projects:
+> **First time cloning the monorepo?** The tarball is gitignored, so install order matters — follow [root README → First-time install](../README.md#first-time-install) for the bootstrap. The command below is also what you re-run after any `fum_library` change.
+
+fum_library is consumed as a local tarball (`file:../fum_library/fum_library-<version>.tgz`) rather than via `npm link`. After making changes in fum_library, rebuild and reinstall the tarball into sibling projects:
 
 ```bash
 cd fum_library

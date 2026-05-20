@@ -38,13 +38,13 @@ FUM Library provides a modular toolkit for managing decentralized finance liquid
 `fum_library` is a private monorepo package (`"private": true` in package.json) — it is **not published to npm** and cannot be installed with `npm install fum_library`. It is consumed only by sibling subprojects in the FUM monorepo (`fum`, `fum_automation`) via local tarball:
 
 ```json
-// fum/package.json
+// fum/package.json — <version> is the current fum_library release (e.g. 2.0.1)
 "dependencies": {
-  "fum_library": "file:../fum_library/fum_library-2.0.0.tgz"
+  "fum_library": "file:../fum_library/fum_library-<version>.tgz"
 }
 ```
 
-To work on the library locally:
+To work on the library locally (or to bootstrap a fresh clone — see [root README → First-time install](../README.md#first-time-install)):
 
 ```bash
 cd fum_library

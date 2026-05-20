@@ -45,7 +45,7 @@ Tradeoffs accepted:
 
 ### 3. Shared pattern: in-build `fum_library` tarball + integrity-strip
 
-Both deploy targets (Dockerfile and Vercel) hit the same fundamental problem: `fum` and `fum_automation` consume `fum_library` via a local tarball (`file:../fum_library/fum_library-2.0.0.tgz`), and `npm pack` produces tarballs whose byte-level content depends on file mtimes. A locally-packed tarball and a build-server-packed tarball produce different SHA512 integrity hashes for the same source, which causes `npm install` to fail with `EINTEGRITY` against the committed lockfile.
+Both deploy targets (Dockerfile and Vercel) hit the same fundamental problem: `fum` and `fum_automation` consume `fum_library` via a local tarball (`file:../fum_library/fum_library-<version>.tgz`), and `npm pack` produces tarballs whose byte-level content depends on file mtimes. A locally-packed tarball and a build-server-packed tarball produce different SHA512 integrity hashes for the same source, which causes `npm install` to fail with `EINTEGRITY` against the committed lockfile.
 
 The shared workaround applied in both places:
 

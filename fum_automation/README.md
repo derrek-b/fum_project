@@ -39,7 +39,7 @@ See [docs/architecture/overview.md](./docs/architecture/overview.md) for the ful
 
 ## Prerequisites
 
-Node.js 22+ and the `fum_library` tarball installed via `npm run pack` — see the [root README](../README.md#monorepo-conventions) for the tarball convention and the `npm link` ban.
+Node.js 22+ and the `fum_library` tarball installed via `npm run pack` — see the [root README](../README.md#monorepo-conventions) for the tarball convention and the `npm link` ban. First time cloning? Follow [root README → First-time install](../README.md#first-time-install) first — the tarball is gitignored, so the `npm install` below fails until `fum_library` is packed.
 
 ## Installation
 

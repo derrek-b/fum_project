@@ -55,6 +55,30 @@ fum_project/
 └── fum_testing/           # Hardhat unit-test environment
 ```
 
+## Getting Started
+
+This is a **single Git repository** — clone it once and all four subprojects come with it (they are not separate repos):
+
+```bash
+git clone https://github.com/derrek-b/fum_project.git
+cd fum_project
+```
+
+### First-time install
+
+`fum` and `fum_automation` consume `fum_library` as a local tarball (a `file:` dependency), and that tarball is **gitignored** — a fresh clone doesn't include it. Build and install it *before* the consumers, or their `npm install` fails on the missing file:
+
+```bash
+cd fum_library && npm install && npm run pack   # build + pack the tarball, install it into fum & fum_automation
+cd ../fum && npm install
+cd ../fum_automation && npm install
+cd ../fum_testing && npm install                # standalone — not a tarball consumer
+```
+
+Re-run `npm run pack` after any `fum_library` change so the consumers pick it up. For the full local stack integration testing (Hardhat fork + automation + frontend), continue to [fum/TESTING.md](fum/TESTING.md).
+
+All commands in this repo's docs run from this root — see [Monorepo Conventions](#monorepo-conventions).
+
 ## Where to Start
 
 This README is orientation. Each subproject has its own README and TESTING guide with full setup details — pick your destination below.

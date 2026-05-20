@@ -40,6 +40,8 @@ fum_project/
 └── fum_testing/      # Contract unit tests
 ```
 
+This is a **single Git repository** — clone it once and all four subprojects come with it; they are not separate repos. See the [root README](../README.md#getting-started) for clone setup.
+
 ### Environment Setup
 
 1. **Alchemy API Key** - Required for forking Arbitrum or Avalanche mainnet
@@ -62,6 +64,16 @@ cp fum_automation/.env.example fum_automation/.env.local.av  # Automation (Avala
 ```
 
 `AUTOMATION_MNEMONIC` is a BIP-39 mnemonic — the automation service derives a per-vault signing key from it (path `m/44'/60'/0'/0/<executorIndex>`). **For local Hardhat testing, it must match the dev mnemonic hardcoded in the seed scripts** (`fum/test/scripts/seed*.js` — search for `DEV_MNEMONIC`), since the seed scripts derive the executor address from that mnemonic and register it via `vault.setExecutor(...)`. If the two don't match, automation's ownership-verification check during vault discovery sees that its derived address doesn't equal the vault's on-chain executor, logs `does not match — skipping`, and never manages the vault.
+
+### Install Dependencies
+
+Install before starting any terminals. Because `fum`/`fum_automation` consume `fum_library` via a gitignored tarball, **`fum_library` must be packed first** — see [root README → First-time install](../README.md#first-time-install) for the full sequence and rationale. Short version:
+
+```bash
+cd fum_library && npm install && npm run pack
+cd ../fum && npm install
+cd ../fum_automation && npm install
+```
 
 ## Quick Start
 
