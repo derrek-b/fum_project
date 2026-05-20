@@ -18,7 +18,7 @@ function ErrorPage({ statusCode }) {
   return (
     <div>
       <Head>
-        <title>{`${title} | D-fied`}</title>
+        <title>{`D-fied | ${title}`}</title>
       </Head>
       <div style={{
         display: 'flex',

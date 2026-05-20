@@ -44,7 +44,7 @@ export default function VaultsPage() {
   return (
     <div>
       <Head>
-        <title>DeFi Vaults | Liquidity Management Dashboard</title>
+        <title>D-fied | Vaults</title>
         <meta name="description" content="Manage your DeFi vaults and automated strategies" />
       </Head>
 

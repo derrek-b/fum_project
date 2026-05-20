@@ -523,7 +523,7 @@ export default function VaultDetailPage() {
       <Navbar />
       <Container className="py-4">
         <Head>
-          <title>{`${vaultFromRedux?.name || 'Vault Detail'} | DeFi Dashboard`}</title>
+          <title>{`D-fied | ${vaultFromRedux?.name || 'Vault Detail'}`}</title>
         </Head>
 
         <div className="mb-4 animate-fade-in d-flex justify-content-between align-items-center">

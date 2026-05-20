@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useRouter } from "next/router";
 import { Provider, useDispatch, useSelector } from "react-redux";
 import { store } from "../redux/store";
 import { ErrorBoundary } from 'react-error-boundary';
@@ -8,7 +9,10 @@ import { markAutoRefresh } from '../redux/updateSlice';
 import { setPositionsLastFetched } from '../redux/positionsSlice';
 import { setVaultsLastFetched } from '../redux/vaultsSlice';
 import { useAutomationEvents } from '../hooks/useAutomationEvents';
+import BetaBanner from '../components/common/BetaBanner';
 import { initFumLibrary } from 'fum_library';
+
+const BETA_BANNER_ROUTES = ['/vaults', '/positions', '/vault/[address]', '/position/[id]'];
 
 import "bootstrap/dist/css/bootstrap.min.css";
 import "../styles/globals.css";
@@ -104,6 +108,9 @@ function AutomationEventsHandler() {
 }
 
 export default function MyApp({ Component, pageProps }) {
+  const router = useRouter();
+  const showBetaBanner = BETA_BANNER_ROUTES.includes(router.pathname);
+
   // Multiple global error handlers
   useEffect(() => {
     // 1. Unhandled Promise rejections
@@ -150,6 +157,7 @@ export default function MyApp({ Component, pageProps }) {
           <ToastProvider>
             <AutoRefreshHandler />
             <AutomationEventsHandler />
+            {showBetaBanner && <BetaBanner />}
             <Component {...pageProps} />
           </ToastProvider>
         </ErrorBoundary>

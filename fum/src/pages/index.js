@@ -5,7 +5,7 @@ export default function Home() {
   return (
     <div>
       <Head>
-        <title>D-fied | DeFi Liquidity Management</title>
+        <title>D-fied | Automated Liquidity Management</title>
         <meta name="description" content="DeFi liquidity position management platform" />
       </Head>
       <div style={{

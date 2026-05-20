@@ -39,7 +39,7 @@ export default function PositionsPage() {
   return (
     <div>
       <Head>
-        <title>Position Dashboard | D-fied</title>
+        <title>D-fied | Positions</title>
         <meta name="description" content="Manage your DeFi liquidity positions" />
       </Head>
 

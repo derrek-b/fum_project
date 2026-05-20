@@ -193,7 +193,7 @@ export default function DemoPage() {
     return (
       <>
         <Head>
-          <title>Demo - FUM</title>
+          <title>D-fied | Demo</title>
         </Head>
         <Navbar />
         <Container className="py-5">
@@ -210,7 +210,7 @@ export default function DemoPage() {
     return (
       <>
         <Head>
-          <title>Demo - FUM</title>
+          <title>D-fied | Demo</title>
         </Head>
         <Navbar />
         <Container className="py-5">
@@ -226,7 +226,7 @@ export default function DemoPage() {
   return (
     <>
       <Head>
-        <title>Demo - FUM</title>
+        <title>D-fied | Demo</title>
         <meta name="description" content="Watch live DeFi automation in action" />
       </Head>
       <Navbar />
