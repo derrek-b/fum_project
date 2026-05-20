@@ -68,7 +68,7 @@ Analyze all staged changes and draft a commit message:
 1. Determine the nature of the change (new feature, enhancement, bug fix, refactoring, docs, etc.)
 2. If scoped to a subproject, prefix appropriately (e.g., changes only in fum_library get a message focused on fum_library)
 3. Keep it concise: 1-2 sentence summary focusing on "why" not "what"
-4. End with: `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`
+4. End with: `Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>`
 
 **Present to user:**
 - Show the list of staged files
@@ -84,7 +84,7 @@ Create the commit using a HEREDOC for the message:
 git commit -m "$(cat <<'EOF'
 Commit message here.
 
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -215,7 +215,7 @@ After all updates are applied, stage the changed docs and commit:
 git commit -m "$(cat <<'EOF'
 docs(subproject): update X based on Y changes
 
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 EOF
 )"
 ```
